@@ -14,27 +14,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '17'
-
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.x'
           channel: 'stable'
-          cache: true
 
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build iOS App (No Sign for Testing)
+      - name: Build iOS App (No Sign)
         run: flutter build ios --release --no-codesign
+
+      - name: Zip Runner.app
+        run: |
+          cd build/ios/iphoneos
+          zip -r Tembs-iOS.zip Runner.app
 
       - name: Upload iOS Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Tembs-iOS-Build
-          path: build/ios/iphoneos/Runner.app
+          name: Tembs-iOS-App
+          path: build/ios/iphoneos/Tembs-iOS.zip
