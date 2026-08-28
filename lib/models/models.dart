@@ -1,0 +1,101 @@
+class Category {
+  final String id;
+  final String name;
+
+  Category({required this.id, required this.name});
+
+  factory Category.fromJson(Map<String, dynamic> json) => Category(
+        id: json['id'],
+        name: json['name'],
+      );
+}
+
+class Product {
+  final String id;
+  final String? categoryId;
+  final String name;
+  final String? description;
+  final double price;
+  final int quantity;
+  final String? imageUrl;
+  final DateTime createdAt;
+
+  Product({
+    required this.id,
+    required this.categoryId,
+    required this.name,
+    required this.description,
+    required this.price,
+    required this.quantity,
+    required this.imageUrl,
+    required this.createdAt,
+  });
+
+  factory Product.fromJson(Map<String, dynamic> json) => Product(
+        id: json['id'],
+        categoryId: json['category_id'],
+        name: json['name'],
+        description: json['description'],
+        price: (json['price'] as num).toDouble(),
+        quantity: (json['quantity'] as num).toInt(),
+        imageUrl: json['image_url'],
+        createdAt: DateTime.parse(json['created_at']),
+      );
+}
+
+class Customer {
+  final String id;
+  final String name;
+  final String? phone;
+  final String? address;
+  final String? notes;
+
+  Customer({required this.id, required this.name, this.phone, this.address, this.notes});
+
+  factory Customer.fromJson(Map<String, dynamic> json) => Customer(
+        id: json['id'],
+        name: json['name'],
+        phone: json['phone'],
+        address: json['address'],
+        notes: json['notes'],
+      );
+}
+
+class Sale {
+  final String id;
+  final String? customerId;
+  final String? customerName;
+  final String? customerPhone;
+  final double total;
+  final String paymentMethod;
+  final DateTime createdAt;
+
+  Sale({
+    required this.id,
+    required this.customerId,
+    required this.customerName,
+    this.customerPhone,
+    required this.total,
+    required this.paymentMethod,
+    required this.createdAt,
+  });
+
+  factory Sale.fromJson(Map<String, dynamic> json) => Sale(
+        id: json['id'],
+        customerId: json['customer_id'],
+        customerName: json['customers'] != null ? json['customers']['name'] : null,
+        customerPhone: json['customers'] != null ? json['customers']['phone'] : null,
+        total: (json['total'] as num).toDouble(),
+        paymentMethod: json['payment_method'],
+        createdAt: DateTime.parse(json['created_at']),
+      );
+}
+
+class CartLine {
+  final Product product;
+  int quantity;
+
+  CartLine({required this.product, this.quantity = 1});
+
+  double get lineTotal => product.price * quantity;
+}
