@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../main.dart';
 import '../../config/theme.dart';
 import '../../models/models.dart';
-import '../../services/auth_service.dart';
+import '../../services/database_service.dart';
 import '../widgets/screen_header.dart';
 
 class CustomersScreen extends StatefulWidget {
@@ -12,10 +11,10 @@ class CustomersScreen extends StatefulWidget {
   const CustomersScreen({super.key, this.onProfileTap});
 
   @override
-  State<CustomersScreen> createState() => _CustomersScreenState();
+  State<CustomersScreen> createState() => CustomersScreenState();
 }
 
-class _CustomersScreenState extends State<CustomersScreen> {
+class CustomersScreenState extends State<CustomersScreen> {
   List<Customer> customers = [];
   bool loading = true;
   String searchQuery = '';
@@ -32,9 +31,9 @@ class _CustomersScreenState extends State<CustomersScreen> {
 
   Future<void> loadData() async {
     setState(() => loading = true);
-    final res = await supabase.from('customers').select().order('name');
+    final res = await DatabaseService.getCustomers();
     setState(() {
-      customers = (res as List).map((e) => Customer.fromJson(e)).toList();
+      customers = res;
       loading = false;
     });
   }
@@ -325,7 +324,7 @@ class _AddCustomerSheetState extends State<AddCustomerSheet> {
     if (confirm == true) {
       setState(() => saving = true);
       try {
-        await supabase.from('customers').delete().eq('id', widget.customer!.id);
+        await DatabaseService.deleteCustomer(widget.customer!.id);
         setState(() => saving = false);
         widget.onSaved();
         if (mounted) Navigator.pop(context);
@@ -348,9 +347,7 @@ class _AddCustomerSheetState extends State<AddCustomerSheet> {
       return;
     }
     setState(() => saving = true);
-    final userId = AuthService.currentUserId;
     final data = {
-      'user_id': userId,
       'name': nameController.text.trim(),
       'phone': phoneController.text.trim().isEmpty ? null : phoneController.text.trim(),
       'address': addressController.text.trim().isEmpty ? null : addressController.text.trim(),
@@ -359,9 +356,9 @@ class _AddCustomerSheetState extends State<AddCustomerSheet> {
 
     try {
       if (widget.customer != null) {
-        await supabase.from('customers').update(data).eq('id', widget.customer!.id);
+        await DatabaseService.updateCustomer(widget.customer!.id, data);
       } else {
-        await supabase.from('customers').insert(data);
+        await DatabaseService.insertCustomer(data);
       }
       setState(() => saving = false);
       widget.onSaved();

@@ -3,8 +3,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import '../../main.dart';
 import '../../config/theme.dart';
+import '../../services/database_service.dart';
 
 const months = [
   'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
@@ -63,16 +63,15 @@ class _ExportScreenState extends State<ExportScreen>
           ? DateTime(selectedYear, selectedMonth + 2, 1)
           : DateTime(selectedYear + 1, 1, 1);
 
-      final salesRes = await supabase
-          .from('sales')
-          .select('total')
-          .gte('created_at', start.toIso8601String())
-          .lt('created_at', end.toIso8601String());
+      final db = await DatabaseService.database;
+      final salesRes = await db.rawQuery(
+        'SELECT total FROM sales WHERE created_at >= ? AND created_at < ?',
+        [start.toIso8601String(), end.toIso8601String()],
+      );
 
-      final list = salesRes as List;
       setState(() {
-        previewRevenue = list.fold(0.0, (s, r) => s + (r['total'] as num));
-        previewSalesCount = list.length;
+        previewRevenue = salesRes.fold(0.0, (s, r) => s + (r['total'] as num));
+        previewSalesCount = salesRes.length;
         loadingPreview = false;
         previewLoaded = true;
       });
@@ -91,14 +90,18 @@ class _ExportScreenState extends State<ExportScreen>
           ? DateTime(selectedYear, selectedMonth + 2, 1)
           : DateTime(selectedYear + 1, 1, 1);
 
-      final salesRes = await supabase
-          .from('sales')
-          .select('id,total,payment_method,created_at,customers(name),sale_items(quantity,unit_price,products(name))')
-          .gte('created_at', start.toIso8601String())
-          .lt('created_at', end.toIso8601String())
-          .order('created_at');
+      final db = await DatabaseService.database;
+      final salesList = await db.rawQuery(
+        'SELECT s.id, s.total, s.payment_method, s.created_at, s.customer_name FROM sales s WHERE s.created_at >= ? AND s.created_at < ? ORDER BY s.created_at',
+        [start.toIso8601String(), end.toIso8601String()],
+      );
+      final saleItems = await db.rawQuery(
+        '''SELECT si.sale_id, si.product_name, si.quantity, si.price FROM sale_items si
+           JOIN sales s ON s.id = si.sale_id
+           WHERE s.created_at >= ? AND s.created_at < ?''',
+        [start.toIso8601String(), end.toIso8601String()],
+      );
 
-      final salesList = salesRes as List;
       final totalRevenue = salesList.fold<double>(0, (s, r) => s + (r['total'] as num));
       final avgSale = salesList.isEmpty ? 0 : totalRevenue / salesList.length;
 
@@ -108,20 +111,23 @@ class _ExportScreenState extends State<ExportScreen>
       for (final sale in salesList) {
         final pm = sale['payment_method'] as String? ?? 'Inconnu';
         paymentMethodCounts[pm] = (paymentMethodCounts[pm] ?? 0) + 1;
+      }
 
-        for (final item in (sale['sale_items'] as List? ?? [])) {
-          final pname = item['products'] != null ? item['products']['name'] : 'Produit supprimé';
-          productTotals.putIfAbsent(pname, () => {'qty': 0, 'revenue': 0});
-          productTotals[pname]!['qty'] = productTotals[pname]!['qty']! + (item['quantity'] as num);
-          productTotals[pname]!['revenue'] = productTotals[pname]!['revenue']! +
-              (item['quantity'] as num) * (item['unit_price'] as num);
-        }
+      for (final item in saleItems) {
+        final pname = item['product_name'] as String? ?? 'Produit supprimé';
+        productTotals.putIfAbsent(pname, () => {'qty': 0, 'revenue': 0});
+        productTotals[pname]!['qty'] = productTotals[pname]!['qty']! + (item['quantity'] as num);
+        productTotals[pname]!['revenue'] = productTotals[pname]!['revenue']! +
+            (item['quantity'] as num) * (item['price'] as num);
       }
 
       final topProducts = productTotals.entries.toList()
         ..sort((a, b) => b.value['revenue']!.compareTo(a.value['revenue']!));
       final top10 = topProducts.take(10).toList();
       final periodLabel = mode == 'month' ? '${months[selectedMonth]} $selectedYear' : 'Année $selectedYear';
+      final profile = await DatabaseService.getShopProfile();
+      final shopName = (profile['name'] ?? 'TEMBS').toUpperCase();
+
 
       final doc = pw.Document();
       doc.addPage(
@@ -140,8 +146,8 @@ class _ExportScreenState extends State<ExportScreen>
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-                    pw.Text('TEMBS', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold, color: PdfColors.white)),
-                    pw.Text('Contrat de ventes', style: const pw.TextStyle(fontSize: 14, color: PdfColors.white)),
+                    pw.Text(shopName, style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold, color: PdfColors.white)),
+                    pw.Text('Rapport de ventes', style: const pw.TextStyle(fontSize: 14, color: PdfColors.white)),
                   ]),
                   pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
                     pw.Text('Période : $periodLabel', style: const pw.TextStyle(fontSize: 12, color: PdfColors.white)),
@@ -247,13 +253,15 @@ class _ExportScreenState extends State<ExportScreen>
                   ...salesList.asMap().entries.map((entry) {
                     final s = entry.value;
                     final isEven = entry.key.isEven;
-                    final date = DateTime.parse(s['created_at']);
+                    final date = DateTime.parse(s['created_at'] as String);
+                    final custName = s['customer_name'] as String?;
+                    final payMethod = s['payment_method'] as String? ?? 'Espèces';
                     return pw.TableRow(
                       decoration: pw.BoxDecoration(color: isEven ? PdfColors.white : PdfColors.grey50),
                       children: [
                         pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('${date.day}/${date.month}/${date.year}', style: const pw.TextStyle(fontSize: 10))),
-                        pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text(s['customers'] != null ? s['customers']['name'] : 'Client de passage', style: const pw.TextStyle(fontSize: 10))),
-                        pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text(s['payment_method'], style: const pw.TextStyle(fontSize: 10))),
+                        pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text(custName != null && custName.isNotEmpty ? custName : 'Client de passage', style: const pw.TextStyle(fontSize: 10))),
+                        pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text(payMethod, style: const pw.TextStyle(fontSize: 10))),
                         pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text(formatFCFA(s['total'] as num), style: const pw.TextStyle(fontSize: 10), textAlign: pw.TextAlign.right)),
                       ],
                     );
@@ -311,6 +319,7 @@ class _ExportScreenState extends State<ExportScreen>
     final periodLabel = mode == 'month'
         ? '${months[selectedMonth]} $selectedYear'
         : 'Année $selectedYear';
+    final topPadding = MediaQuery.of(context).padding.top + 16;
 
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -319,7 +328,7 @@ class _ExportScreenState extends State<ExportScreen>
           // AppBar personnalisée
           SliverToBoxAdapter(
             child: Container(
-              padding: const EdgeInsets.fromLTRB(24, 60, 24, 28),
+              padding: EdgeInsets.fromLTRB(24, topPadding, 24, 28),
               decoration: const BoxDecoration(
                 gradient: AppGradients.authHero,
                 borderRadius: BorderRadius.only(

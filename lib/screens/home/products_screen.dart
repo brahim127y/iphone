@@ -2,21 +2,21 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
-import '../../main.dart';
 import '../../config/theme.dart';
 import '../../models/models.dart';
-import '../../services/auth_service.dart';
+import '../../services/database_service.dart';
 import '../widgets/screen_header.dart';
+import '../widgets/product_image_view.dart';
 
 class ProductsScreen extends StatefulWidget {
   final VoidCallback? onProfileTap;
   const ProductsScreen({super.key, this.onProfileTap});
 
   @override
-  State<ProductsScreen> createState() => _ProductsScreenState();
+  State<ProductsScreen> createState() => ProductsScreenState();
 }
 
-class _ProductsScreenState extends State<ProductsScreen> {
+class ProductsScreenState extends State<ProductsScreen> {
   List<Product> products = [];
   List<Category> categories = [];
   bool loading = true;
@@ -38,11 +38,11 @@ class _ProductsScreenState extends State<ProductsScreen> {
   Future<void> loadData() async {
     setState(() => loading = true);
     try {
-      final prodRes = await supabase.from('products').select().order('created_at', ascending: false);
-      final catRes = await supabase.from('categories').select().order('name');
+      final prods = await DatabaseService.getProducts();
+      final cats = await DatabaseService.getCategories();
       setState(() {
-        products = (prodRes as List).map((e) => Product.fromJson(e)).toList();
-        categories = (catRes as List).map((e) => Category.fromJson(e)).toList();
+        products = prods;
+        categories = cats;
         loading = false;
       });
     } catch (e) {
@@ -211,13 +211,13 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                   // Image
                                   ClipRRect(
                                     borderRadius: const BorderRadius.vertical(top: Radius.circular(17)),
-                                    child: p.imageUrl != null
-                                        ? Image.network(p.imageUrl!, height: 100, width: double.infinity, fit: BoxFit.cover)
-                                        : Container(
-                                            height: 100,
-                                            color: AppColors.surfaceAlt,
-                                            child: const Center(child: Icon(Icons.inventory_2_outlined, color: AppColors.textMuted, size: 36)),
-                                          ),
+                                    child: ProductImageView(
+                                      imageUrl: p.imageUrl,
+                                      height: 100,
+                                      width: double.infinity,
+                                      fit: BoxFit.cover,
+                                      iconSize: 36,
+                                    ),
                                   ),
                                   Padding(
                                     padding: const EdgeInsets.all(10),
@@ -365,7 +365,7 @@ class _AddProductSheetState extends State<AddProductSheet> {
     if (confirm == true) {
       setState(() => saving = true);
       try {
-        await supabase.from('products').delete().eq('id', widget.product!.id);
+        await DatabaseService.deleteProduct(widget.product!.id);
         setState(() => saving = false);
         widget.onSaved();
         if (mounted) Navigator.pop(context);
@@ -501,15 +501,10 @@ class _AddProductSheetState extends State<AddProductSheet> {
     if (name.isEmpty) return;
     setState(() => addingCategory = true);
     try {
-      final userId = AuthService.currentUserId;
-      // On n'envoie PAS de champ 'color' pour éviter des erreurs si la colonne n'existe pas
-      final res = await supabase.from('categories').insert({
-        'name': name,
-        'user_id': userId,
-      }).select().single();
+      final cat = await DatabaseService.insertCategory(name);
       setState(() {
-        categories.add(Category.fromJson(res));
-        categoryId = res['id'];
+        categories.add(cat);
+        categoryId = cat.id;
         newCategoryController.clear();
         addingCategory = false;
       });
@@ -523,22 +518,11 @@ class _AddProductSheetState extends State<AddProductSheet> {
     }
   }
 
-  Future<String?> uploadImage(String userId) async {
+  Future<String?> uploadImage() async {
     if (imageUrlOverride != null && imageUrlOverride!.isNotEmpty) return imageUrlOverride;
     if (imageFile == null) return null;
-    try {
-      final ext = imageFile!.path.split('.').last;
-      final path = '$userId/${DateTime.now().millisecondsSinceEpoch}.$ext';
-      await supabase.storage.from('product-images').upload(path, imageFile!);
-      return supabase.storage.from('product-images').getPublicUrl(path);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Échec du téléchargement de l\'image : $e'), backgroundColor: AppColors.warning),
-        );
-      }
-      return null;
-    }
+    // Image stored locally — return local file path
+    return imageFile!.path;
   }
 
   Future<void> save() async {
@@ -549,11 +533,9 @@ class _AddProductSheetState extends State<AddProductSheet> {
       return;
     }
     setState(() => saving = true);
-    final userId = AuthService.currentUserId;
-    final imageUrl = await uploadImage(userId);
+    final imageUrl = await uploadImage();
 
     final data = {
-      'user_id': userId,
       'name': nameController.text.trim(),
       'description': descController.text.trim().isEmpty ? null : descController.text.trim(),
       'price': double.tryParse(priceController.text.replaceAll(',', '.')) ?? 0,
@@ -564,9 +546,9 @@ class _AddProductSheetState extends State<AddProductSheet> {
 
     try {
       if (widget.product != null) {
-        await supabase.from('products').update(data).eq('id', widget.product!.id);
+        await DatabaseService.updateProduct(widget.product!.id, data);
       } else {
-        await supabase.from('products').insert(data);
+        await DatabaseService.insertProduct(data);
       }
       setState(() => saving = false);
       widget.onSaved();
@@ -778,7 +760,12 @@ class _AddProductSheetState extends State<AddProductSheet> {
       return Image.file(imageFile!, fit: BoxFit.cover, width: double.infinity);
     }
     if (imageUrlOverride != null && imageUrlOverride!.isNotEmpty) {
-      return Image.network(imageUrlOverride!, fit: BoxFit.cover, width: double.infinity);
+      return ProductImageView(
+        imageUrl: imageUrlOverride,
+        height: 180,
+        width: double.infinity,
+        fit: BoxFit.cover,
+      );
     }
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,

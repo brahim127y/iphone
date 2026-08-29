@@ -17,19 +17,35 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
-  late final List<Widget> _screens;
+  final _dashboardKey = GlobalKey<DashboardScreenState>();
+  final _productsKey = GlobalKey<ProductsScreenState>();
+  final _salesKey = GlobalKey<SalesScreenState>();
+  final _customersKey = GlobalKey<CustomersScreenState>();
 
-  @override
-  void initState() {
-    super.initState();
-    _screens = [
-      DashboardScreen(onProfileTap: () => setState(() => _index = 5)),
-      ProductsScreen(onProfileTap: () => setState(() => _index = 5)),
-      SalesScreen(onProfileTap: () => setState(() => _index = 5)),
-      CustomersScreen(onProfileTap: () => setState(() => _index = 5)),
-      ExportScreen(onProfileTap: () => setState(() => _index = 5)),
-      const ProfileScreen(),
-    ];
+  void _handleQuickAction(String action) {
+    switch (action) {
+      case 'new_sale':
+        setState(() => _index = 2);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _salesKey.currentState?.openNewSaleSheet();
+        });
+        break;
+      case 'add_product':
+        setState(() => _index = 1);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _productsKey.currentState?.openAddSheet();
+        });
+        break;
+      case 'add_customer':
+        setState(() => _index = 3);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _customersKey.currentState?.openAddSheet();
+        });
+        break;
+      case 'export_pdf':
+        setState(() => _index = 4);
+        break;
+    }
   }
 
   final _destinations = const [
@@ -65,9 +81,34 @@ class _HomeShellState extends State<HomeShell> {
     ),
   ];
 
-
   @override
   Widget build(BuildContext context) {
+    final screens = [
+      DashboardScreen(
+        key: _dashboardKey,
+        onProfileTap: () => setState(() => _index = 5),
+        onQuickAction: _handleQuickAction,
+      ),
+      ProductsScreen(
+        key: _productsKey,
+        onProfileTap: () => setState(() => _index = 5),
+      ),
+      SalesScreen(
+        key: _salesKey,
+        onProfileTap: () => setState(() => _index = 5),
+      ),
+      CustomersScreen(
+        key: _customersKey,
+        onProfileTap: () => setState(() => _index = 5),
+      ),
+      ExportScreen(onProfileTap: () => setState(() => _index = 5)),
+      ProfileScreen(
+        onProfileUpdated: () {
+          _dashboardKey.currentState?.loadStats();
+        },
+      ),
+    ];
+
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: null,
@@ -81,7 +122,7 @@ class _HomeShellState extends State<HomeShell> {
           ),
           child: KeyedSubtree(
             key: ValueKey(_index),
-            child: _screens[_index],
+            child: screens[_index],
           ),
         ),
       ),

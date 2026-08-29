@@ -8,6 +8,8 @@ class Category {
         id: json['id'],
         name: json['name'],
       );
+
+  Map<String, dynamic> toJson() => {'id': id, 'name': name};
 }
 
 class Product {
@@ -41,6 +43,17 @@ class Product {
         imageUrl: json['image_url'],
         createdAt: DateTime.parse(json['created_at']),
       );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'category_id': categoryId,
+        'name': name,
+        'description': description,
+        'price': price,
+        'quantity': quantity,
+        'image_url': imageUrl,
+        'created_at': createdAt.toIso8601String(),
+      };
 }
 
 class Customer {
@@ -59,6 +72,14 @@ class Customer {
         address: json['address'],
         notes: json['notes'],
       );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'phone': phone,
+        'address': address,
+        'notes': notes,
+      };
 }
 
 class Sale {
@@ -83,8 +104,8 @@ class Sale {
   factory Sale.fromJson(Map<String, dynamic> json) => Sale(
         id: json['id'],
         customerId: json['customer_id'],
-        customerName: json['customers'] != null ? json['customers']['name'] : null,
-        customerPhone: json['customers'] != null ? json['customers']['phone'] : null,
+        customerName: json['customer_name'],
+        customerPhone: json['customer_phone'],
         total: (json['total'] as num).toDouble(),
         paymentMethod: json['payment_method'],
         createdAt: DateTime.parse(json['created_at']),

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../main.dart';
 import '../../config/theme.dart';
-import '../../services/auth_service.dart';
+import '../../services/database_service.dart';
 
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
+  final VoidCallback? onProfileUpdated;
+  const ProfileScreen({super.key, this.onProfileUpdated});
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -14,12 +14,8 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final nameController = TextEditingController();
   final phoneController = TextEditingController();
-  bool loading = true;
-  bool saving = false;
-  Map<String, dynamic>? profile;
-
-  String get userEmail => AuthService.currentUserEmail;
-  String get userId => AuthService.currentUserId;
+  bool _saving = false;
+  bool _loading = true;
 
   @override
   void initState() {
@@ -28,83 +24,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _loadProfile() async {
-    setState(() => loading = true);
-    try {
-      final data =
-          await supabase.from('profiles').select().eq('id', userId).maybeSingle();
-      if (mounted) {
-        setState(() {
-          profile = data;
-          nameController.text = data?['full_name'] ?? '';
-          phoneController.text = data?['phone'] ?? '';
-          loading = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => loading = false);
-    }
+    final profile = await DatabaseService.getShopProfile();
+    if (!mounted) return;
+    nameController.text = profile['name'] ?? 'Tembs';
+    phoneController.text = profile['phone'] ?? '';
+    setState(() => _loading = false);
   }
 
   Future<void> _saveProfile() async {
-    final name = nameController.text.trim();
-    final phone = phoneController.text.trim();
-    setState(() => saving = true);
-    try {
-      await supabase.from('profiles').upsert({
-        'id': userId,
-        'full_name': name,
-        'phone': phone,
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-      _showMessage('✅ Profil mis à jour !');
-    } catch (e) {
-      _showMessage('Erreur : $e');
-    } finally {
-      if (mounted) setState(() => saving = false);
-    }
+    setState(() => _saving = true);
+    await DatabaseService.saveShopProfile(
+      name: nameController.text,
+      phone: phoneController.text,
+    );
+    if (!mounted) return;
+    setState(() => _saving = false);
+    _showMessage('✅ Modifications enregistrées !');
+    widget.onProfileUpdated?.call();
   }
 
-  Future<void> _signOut() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-          side: const BorderSide(color: AppColors.border),
-        ),
-        title: Text(
-          'Déconnexion',
-          style: GoogleFonts.outfit(
-              color: AppColors.text, fontWeight: FontWeight.w700),
-        ),
-        content: Text(
-          'Es-tu sûr de vouloir te déconnecter ?',
-          style: GoogleFonts.outfit(color: AppColors.textMuted),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Annuler',
-                style: GoogleFonts.outfit(color: AppColors.textMuted)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.danger,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-            ),
-            child: Text('Déconnecter',
-                style: GoogleFonts.outfit(fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ),
-    );
-    if (confirm == true) {
-      await AuthService.logout();
-    }
+  @override
+  void dispose() {
+    nameController.dispose();
+    phoneController.dispose();
+    super.dispose();
   }
 
   void _showMessage(String msg) {
@@ -119,26 +62,60 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  @override
-  void dispose() {
-    nameController.dispose();
-    phoneController.dispose();
-    super.dispose();
+  Future<void> _clearAllData() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: AppColors.border),
+        ),
+        title: Text('Réinitialiser les données',
+            style: GoogleFonts.outfit(color: AppColors.text, fontWeight: FontWeight.w700)),
+        content: Text(
+          'Toutes vos données (produits, clients, ventes) seront supprimées définitivement. Cette action est irréversible !',
+          style: GoogleFonts.outfit(color: AppColors.textMuted),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Annuler', style: GoogleFonts.outfit(color: AppColors.textMuted)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.danger,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: Text('Supprimer tout', style: GoogleFonts.outfit(fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      try {
+        final db = await DatabaseService.database;
+        await db.delete('sale_items');
+        await db.delete('sales');
+        await db.delete('products');
+        await db.delete('categories');
+        await db.delete('customers');
+        _showMessage('✅ Données réinitialisées !');
+      } catch (e) {
+        _showMessage('Erreur : $e');
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (loading) {
-      return const Center(
-          child: CircularProgressIndicator(color: AppColors.primary));
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
     }
-
-    final name = nameController.text.isNotEmpty
-        ? nameController.text
-        : userEmail.split('@').first;
-    final initials = name.isNotEmpty
-        ? name.trim().split(' ').map((w) => w[0].toUpperCase()).take(2).join()
-        : '?';
+    final name = nameController.text.isNotEmpty ? nameController.text : 'Tembs';
+    final initials = name.trim().split(' ').map((w) => w[0].toUpperCase()).take(2).join();
 
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
@@ -147,7 +124,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         Center(
           child: Column(
             children: [
-              // Avatar avec initiales
               Container(
                 width: 90,
                 height: 90,
@@ -184,7 +160,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 4),
               Text(
-                userEmail,
+                'Application hors ligne · Tembs',
                 style: GoogleFonts.outfit(
                   color: AppColors.textMuted,
                   fontSize: 13,
@@ -192,8 +168,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 10),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                 decoration: BoxDecoration(
                   gradient: AppGradients.accent,
                   borderRadius: BorderRadius.circular(20),
@@ -201,11 +176,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.verified_rounded,
-                        color: Colors.white, size: 14),
+                    const Icon(Icons.wifi_off_rounded, color: Colors.white, size: 14),
                     const SizedBox(width: 6),
                     Text(
-                      'Compte vérifié',
+                      'Mode hors ligne',
                       style: GoogleFonts.outfit(
                         color: Colors.white,
                         fontSize: 12,
@@ -221,17 +195,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
         const SizedBox(height: 32),
 
-        // Section : Informations personnelles
-        _sectionTitle('Informations personnelles'),
+        // Infos boutique
+        _sectionTitle('Informations de la boutique'),
         const SizedBox(height: 12),
         GlassCard(
           child: Column(
             children: [
               _infoField(
                 controller: nameController,
-                label: 'Nom complet',
-                icon: Icons.badge_rounded,
-                hint: 'Votre nom complet',
+                label: 'Nom de la boutique',
+                icon: Icons.store_rounded,
+                hint: 'Nom de votre boutique',
                 keyboardType: TextInputType.name,
               ),
               const SizedBox(height: 16),
@@ -247,78 +221,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ],
           ),
         ),
-
-        const SizedBox(height: 12),
-
-        // Email (non modifiable)
-        GlassCard(
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceAlt,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.email_outlined,
-                    color: AppColors.textMuted, size: 18),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Email',
-                      style: GoogleFonts.outfit(
-                          color: AppColors.textMuted, fontSize: 11),
-                    ),
-                    Text(
-                      userEmail,
-                      style: GoogleFonts.outfit(
-                        color: AppColors.text,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceAlt,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: Text(
-                  'Non modifiable',
-                  style: GoogleFonts.outfit(
-                      color: AppColors.textMuted, fontSize: 10),
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 24),
-
-        // Bouton sauvegarder
+        const SizedBox(height: 16),
         GradientButton(
-          label: 'Sauvegarder',
+          label: 'Enregistrer les modifications',
           onPressed: _saveProfile,
-          loading: saving,
+          loading: _saving,
           icon: Icons.save_rounded,
         ),
 
         const SizedBox(height: 24),
 
-        // Section : Application
+        // Section Application
         _sectionTitle('Application'),
         const SizedBox(height: 12),
-
         GlassCard(
           padding: EdgeInsets.zero,
           child: Column(
@@ -328,16 +243,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 iconColor: AppColors.primaryLight,
                 title: 'Version de l\'app',
                 trailing: const Text(
-                  'v1.0.0',
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                  'v1.0.0 — Hors ligne',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 12),
                 ),
               ),
               _divider(),
               _menuItem(
-                icon: Icons.security_rounded,
+                icon: Icons.storage_rounded,
                 iconColor: AppColors.accent,
-                title: 'Sécurité & Confidentialité',
-                onTap: () {},
+                title: 'Données stockées localement',
+                trailing: const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 18),
               ),
               _divider(),
               _menuItem(
@@ -352,7 +267,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
         const SizedBox(height: 24),
 
-        // Bouton déconnexion
+        // Bouton réinitialiser
         SizedBox(
           width: double.infinity,
           height: 56,
@@ -360,15 +275,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
             decoration: BoxDecoration(
               color: AppColors.danger.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                  color: AppColors.danger.withValues(alpha: 0.3)),
+              border: Border.all(color: AppColors.danger.withValues(alpha: 0.3)),
             ),
             child: TextButton.icon(
-              onPressed: _signOut,
-              icon: const Icon(Icons.logout_rounded,
-                  color: AppColors.danger, size: 20),
+              onPressed: _clearAllData,
+              icon: const Icon(Icons.delete_sweep_rounded, color: AppColors.danger, size: 20),
               label: Text(
-                'Se déconnecter',
+                'Réinitialiser toutes les données',
                 style: GoogleFonts.outfit(
                   color: AppColors.danger,
                   fontWeight: FontWeight.w600,
@@ -378,7 +291,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
         ),
-        // Infos du créateur
+
         const SizedBox(height: 24),
         Center(
           child: Column(
@@ -418,8 +331,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
       );
 
-  Widget _divider() =>
-      const Divider(color: AppColors.border, height: 1);
+  Widget _divider() => const Divider(color: AppColors.border, height: 1);
 
   Widget _infoField({
     required TextEditingController controller,
@@ -444,16 +356,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                label,
-                style: GoogleFonts.outfit(
-                    color: AppColors.textMuted, fontSize: 11),
-              ),
+              Text(label, style: GoogleFonts.outfit(color: AppColors.textMuted, fontSize: 11)),
               TextField(
                 controller: controller,
                 keyboardType: keyboardType,
-                style: GoogleFonts.outfit(
-                    color: AppColors.text, fontSize: 14),
+                style: GoogleFonts.outfit(color: AppColors.text, fontSize: 14),
                 decoration: InputDecoration(
                   hintText: hint,
                   isDense: true,
@@ -462,8 +369,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   border: InputBorder.none,
                   enabledBorder: InputBorder.none,
                   focusedBorder: const UnderlineInputBorder(
-                    borderSide:
-                        BorderSide(color: AppColors.primary, width: 1.5),
+                    borderSide: BorderSide(color: AppColors.primary, width: 1.5),
                   ),
                 ),
               ),
@@ -505,12 +411,74 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
             trailing ??
-                Icon(
-                  Icons.chevron_right_rounded,
-                  color: AppColors.textMuted,
-                  size: 20,
-                ),
+                Icon(Icons.chevron_right_rounded, color: AppColors.textMuted, size: 20),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Widgets réutilisables ──────────────────────────────────────────────────
+
+class GlassCard extends StatelessWidget {
+  final Widget child;
+  final EdgeInsetsGeometry? padding;
+  const GlassCard({super.key, required this.child, this.padding});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: padding ?? const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: child,
+    );
+  }
+}
+
+class GradientButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onPressed;
+  final IconData? icon;
+  final bool loading;
+  const GradientButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.icon,
+    this.loading = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      height: 56,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: AppGradients.primary,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.primary.withValues(alpha: 0.35),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: TextButton.icon(
+          onPressed: loading ? null : onPressed,
+          icon: loading
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+              : Icon(icon ?? Icons.check_rounded, color: Colors.white, size: 20),
+          label: Text(
+            label,
+            style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15),
+          ),
         ),
       ),
     );

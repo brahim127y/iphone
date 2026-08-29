@@ -1,37 +1,78 @@
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'config/theme.dart';
-import 'screens/auth_gate.dart';
+import 'screens/home/home_shell.dart';
+import 'screens/home/home_shell_ios.dart';
+import 'services/database_service.dart';
 
-import 'services/auth_service.dart';
-
-final supabase = Supabase.instance.client;
-
-Future<void> main() async {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await dotenv.load(fileName: '.env');
-
-  await Supabase.initialize(
-    url: dotenv.env['SUPABASE_URL'] ?? '',
-    anonKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
-  );
-
-  await AuthService.init();
-
-  runApp(const BoutiqueApp());
+  // Initialize local database
+  await DatabaseService.database;
+  runApp(const TembsApp());
 }
 
-class BoutiqueApp extends StatelessWidget {
-  const BoutiqueApp({super.key});
+class TembsApp extends StatelessWidget {
+  const TembsApp({super.key});
+
+  bool get _isIOS =>
+      defaultTargetPlatform == TargetPlatform.iOS ||
+      defaultTargetPlatform == TargetPlatform.macOS;
 
   @override
   Widget build(BuildContext context) {
+    if (_isIOS) {
+      return CupertinoApp(
+        title: 'Tembs',
+        debugShowCheckedModeBanner: false,
+        theme: CupertinoThemeData(
+          primaryColor: AppColors.primary,
+          brightness: Brightness.light,
+          scaffoldBackgroundColor: AppColors.bg,
+          barBackgroundColor: CupertinoColors.systemBackground,
+          textTheme: CupertinoTextThemeData(
+            primaryColor: AppColors.primary,
+            textStyle: GoogleFonts.outfit(
+              color: AppColors.text,
+              fontSize: 16,
+            ),
+            navTitleTextStyle: GoogleFonts.outfit(
+              color: AppColors.text,
+              fontSize: 17,
+              fontWeight: FontWeight.w600,
+            ),
+            navLargeTitleTextStyle: GoogleFonts.outfit(
+              color: AppColors.text,
+              fontSize: 34,
+              fontWeight: FontWeight.w800,
+            ),
+            actionTextStyle: GoogleFonts.outfit(
+              color: AppColors.primary,
+              fontSize: 17,
+            ),
+          ),
+        ),
+        home: const HomeShellIOS(),
+      );
+    }
+
+    // Android / autres plateformes → Material Design (inchangé)
     return MaterialApp(
       title: 'Tembs',
       debugShowCheckedModeBanner: false,
-      theme: appTheme,
-      home: const AuthGate(),
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: AppColors.primary,
+          brightness: Brightness.light,
+        ),
+        textTheme: GoogleFonts.outfitTextTheme(
+          ThemeData.light().textTheme,
+        ),
+        useMaterial3: true,
+      ),
+      home: const HomeShell(),
     );
   }
 }

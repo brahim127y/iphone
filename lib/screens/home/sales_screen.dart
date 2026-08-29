@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../main.dart';
 import '../../config/theme.dart';
 import '../../models/models.dart';
-import '../../services/auth_service.dart';
+import '../../services/database_service.dart';
 import '../widgets/ticket_generator.dart';
 import '../widgets/screen_header.dart';
+import '../widgets/product_image_view.dart';
 
 const paymentMethods = ['Espèces', 'Mobile Money', 'Carte', 'Crédit'];
 
@@ -14,10 +14,10 @@ class SalesScreen extends StatefulWidget {
   const SalesScreen({super.key, this.onProfileTap});
 
   @override
-  State<SalesScreen> createState() => _SalesScreenState();
+  State<SalesScreen> createState() => SalesScreenState();
 }
 
-class _SalesScreenState extends State<SalesScreen> {
+class SalesScreenState extends State<SalesScreen> {
   List<Sale> sales = [];
   List<Product> products = [];
   List<Customer> customers = [];
@@ -45,17 +45,13 @@ class _SalesScreenState extends State<SalesScreen> {
 
   Future<void> loadData() async {
     setState(() => loading = true);
-    final salesRes = await supabase
-        .from('sales')
-        .select('id,total,payment_method,created_at,customer_id,customers(name,phone)')
-        .order('created_at', ascending: false)
-        .limit(100);
-    final prodRes = await supabase.from('products').select().order('name');
-    final custRes = await supabase.from('customers').select().order('name');
+    final salesList = await DatabaseService.getSales();
+    final prodList = await DatabaseService.getProducts();
+    final custList = await DatabaseService.getCustomers();
     setState(() {
-      sales = (salesRes as List).map((e) => Sale.fromJson(e)).toList();
-      products = (prodRes as List).map((e) => Product.fromJson(e)).toList();
-      customers = (custRes as List).map((e) => Customer.fromJson(e)).toList();
+      sales = salesList;
+      products = prodList;
+      customers = custList;
       loading = false;
     });
   }
@@ -294,17 +290,26 @@ class _SalesScreenState extends State<SalesScreen> {
                                               Text(
                                                 s.customerName ?? 'Client de passage',
                                                 style: GoogleFonts.outfit(color: AppColors.text, fontWeight: FontWeight.w700, fontSize: 15),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
                                               ),
                                               const SizedBox(height: 4),
-                                              Row(
+                                              Wrap(
+                                                crossAxisAlignment: WrapCrossAlignment.center,
+                                                spacing: 6,
+                                                runSpacing: 4,
                                                 children: [
-                                                  Icon(Icons.access_time_rounded, size: 11, color: AppColors.textMuted),
-                                                  const SizedBox(width: 4),
-                                                  Text(
-                                                    '${s.createdAt.day}/${s.createdAt.month}/${s.createdAt.year}',
-                                                    style: GoogleFonts.outfit(color: AppColors.textMuted, fontSize: 11),
+                                                  Row(
+                                                    mainAxisSize: MainAxisSize.min,
+                                                    children: [
+                                                      Icon(Icons.access_time_rounded, size: 11, color: AppColors.textMuted),
+                                                      const SizedBox(width: 4),
+                                                      Text(
+                                                        '${s.createdAt.day}/${s.createdAt.month}/${s.createdAt.year}',
+                                                        style: GoogleFonts.outfit(color: AppColors.textMuted, fontSize: 11),
+                                                      ),
+                                                    ],
                                                   ),
-                                                  const SizedBox(width: 8),
                                                   Container(
                                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                                     decoration: BoxDecoration(
@@ -321,9 +326,10 @@ class _SalesScreenState extends State<SalesScreen> {
                                             ],
                                           ),
                                         ),
+                                        const SizedBox(width: 8),
                                         Text(
                                           formatFCFA(s.total),
-                                          style: GoogleFonts.outfit(color: AppColors.primary, fontWeight: FontWeight.w800, fontSize: 15),
+                                          style: GoogleFonts.outfit(color: AppColors.primary, fontWeight: FontWeight.w800, fontSize: 14),
                                         ),
                                       ],
                                     ),
@@ -397,36 +403,24 @@ class _NewSaleSheetState extends State<NewSaleSheet> {
       return;
     }
     setState(() => saving = true);
-    final userId = AuthService.currentUserId;
 
-    final sale = await supabase
-        .from('sales')
-        .insert({
-          'user_id': userId,
-          'customer_id': selectedCustomer?.id,
-          'total': total,
-          'payment_method': paymentMethod,
-        })
-        .select()
-        .single();
-
-    final items = cart
-        .map((l) => {'sale_id': sale['id'], 'product_id': l.product.id, 'quantity': l.quantity, 'unit_price': l.product.price})
-        .toList();
-    await supabase.from('sale_items').insert(items);
-
-    for (final line in cart) {
-      final newQty = (line.product.quantity - line.quantity).clamp(0, 1 << 30);
-      await supabase.from('products').update({'quantity': newQty}).eq('id', line.product.id);
-    }
+    await DatabaseService.insertSale(
+      customerId: selectedCustomer?.id,
+      customerName: selectedCustomer?.name,
+      customerPhone: selectedCustomer?.phone,
+      total: total,
+      paymentMethod: paymentMethod,
+      cartLines: cart,
+    );
 
     setState(() => saving = false);
     widget.onSaved();
 
+    final profile = await DatabaseService.getShopProfile();
+    final shopName = profile['name'] ?? 'Tembs';
+
     if (mounted) {
       Navigator.pop(context);
-      // Proposer d'envoyer le ticket
-      final shopName = AuthService.currentUserName;
       TicketGenerator.generateAndShare(
         context: context,
         cartLines: cart,
@@ -524,18 +518,15 @@ class _NewSaleSheetState extends State<NewSaleSheet> {
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Container(
-                                        height: 60,
-                                        decoration: BoxDecoration(
-                                          color: AppColors.surfaceAlt,
-                                          borderRadius: BorderRadius.circular(10),
-                                          image: p.imageUrl != null
-                                              ? DecorationImage(image: NetworkImage(p.imageUrl!), fit: BoxFit.cover)
-                                              : null,
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(10),
+                                        child: ProductImageView(
+                                          imageUrl: p.imageUrl,
+                                          height: 60,
+                                          width: double.infinity,
+                                          fit: BoxFit.cover,
+                                          iconSize: 28,
                                         ),
-                                        child: p.imageUrl == null
-                                            ? const Center(child: Icon(Icons.inventory_2_outlined, color: AppColors.textMuted, size: 28))
-                                            : null,
                                       ),
                                       const SizedBox(height: 8),
                                       Text(p.name, style: GoogleFonts.outfit(color: AppColors.text, fontWeight: FontWeight.w600, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),

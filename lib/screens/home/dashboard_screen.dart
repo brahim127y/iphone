@@ -1,20 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../main.dart';
 import '../../config/theme.dart';
-import '../../models/models.dart';
-import '../../services/auth_service.dart';
+import '../../services/database_service.dart';
 import '../widgets/screen_header.dart';
 
 class DashboardScreen extends StatefulWidget {
   final VoidCallback? onProfileTap;
-  const DashboardScreen({super.key, this.onProfileTap});
+  final Function(String action)? onQuickAction;
+  const DashboardScreen({super.key, this.onProfileTap, this.onQuickAction});
 
   @override
-  State<DashboardScreen> createState() => _DashboardScreenState();
+  State<DashboardScreen> createState() => DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen>
+class DashboardScreenState extends State<DashboardScreen>
     with SingleTickerProviderStateMixin {
   double todayTotal = 0;
   double monthTotal = 0;
@@ -22,6 +21,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   int productCount = 0;
   int customerCount = 0;
   int salesCount = 0;
+  String shopName = 'Tembs';
   bool loading = true;
   late AnimationController _animCtrl;
 
@@ -32,10 +32,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     return 'Bonsoir';
   }
 
-  String get _userFirstName {
-    final name = AuthService.currentUserName;
-    return name.isEmpty ? 'Tembs' : name.split(' ').first;
-  }
+  String get _userFirstName => shopName;
 
   @override
   void initState() {
@@ -55,36 +52,20 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Future<void> loadStats() async {
     setState(() => loading = true);
-    final now = DateTime.now();
-    final startOfDay = DateTime(now.year, now.month, now.day).toIso8601String();
-    final startOfMonth = DateTime(now.year, now.month, 1).toIso8601String();
-
     try {
-      final results = await Future.wait([
-        supabase.from('sales').select('total').gte('created_at', startOfDay),
-        supabase.from('sales').select('total').gte('created_at', startOfMonth),
-        supabase.from('products').select('quantity'),
-        supabase.from('customers').select('id'),
-        supabase.from('sales').select('id').gte('created_at', startOfMonth),
-      ]);
-
+      final stats = await DatabaseService.getStats();
+      final profile = await DatabaseService.getShopProfile();
       if (!mounted) return;
-      final todaySales = results[0] as List;
-      final monthSales = results[1] as List;
-      final products = results[2] as List;
-      final customers = results[3] as List;
-      final sales = results[4] as List;
-
       setState(() {
-        todayTotal = todaySales.fold(0.0, (s, r) => s + (r['total'] as num));
-        monthTotal = monthSales.fold(0.0, (s, r) => s + (r['total'] as num));
-        productCount = products.length;
-        lowStockCount = products.where((p) => (p['quantity'] as num) <= 3).length;
-        customerCount = customers.length;
-        salesCount = sales.length;
+        shopName = profile['name'] ?? 'Tembs';
+        todayTotal = stats['todayTotal'] as double;
+        monthTotal = stats['monthTotal'] as double;
+        productCount = stats['productCount'] as int;
+        lowStockCount = stats['lowStockCount'] as int;
+        customerCount = stats['customerCount'] as int;
+        salesCount = stats['salesCount'] as int;
         loading = false;
       });
-
       _animCtrl.forward(from: 0);
     } catch (e) {
       if (mounted) setState(() => loading = false);
@@ -491,19 +472,23 @@ class _DashboardScreenState extends State<DashboardScreen>
       _QuickAction(
           icon: Icons.add_shopping_cart_rounded,
           label: 'Nouvelle\nvente',
-          color: AppColors.accent),
+          color: AppColors.accent,
+          actionKey: 'new_sale'),
       _QuickAction(
           icon: Icons.add_box_rounded,
           label: 'Ajouter\nproduit',
-          color: AppColors.primaryLight),
+          color: AppColors.primaryLight,
+          actionKey: 'add_product'),
       _QuickAction(
           icon: Icons.person_add_rounded,
           label: 'Nouveau\nclient',
-          color: const Color(0xFFF472B6)),
+          color: const Color(0xFFF472B6),
+          actionKey: 'add_customer'),
       _QuickAction(
           icon: Icons.picture_as_pdf_rounded,
           label: 'Exporter\nPDF',
-          color: AppColors.warning),
+          color: AppColors.warning,
+          actionKey: 'export_pdf'),
     ];
 
     return Row(
@@ -522,7 +507,11 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Widget _quickActionButton(_QuickAction action) {
     return InkWell(
-      onTap: () {},
+      onTap: () {
+        if (widget.onQuickAction != null) {
+          widget.onQuickAction!(action.actionKey);
+        }
+      },
       borderRadius: BorderRadius.circular(16),
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
@@ -578,6 +567,7 @@ class _QuickAction {
   final IconData icon;
   final String label;
   final Color color;
+  final String actionKey;
   const _QuickAction(
-      {required this.icon, required this.label, required this.color});
+      {required this.icon, required this.label, required this.color, required this.actionKey});
 }
