@@ -149,139 +149,299 @@ class DashboardScreenState extends State<DashboardScreen>
             onRefresh: loadStats,
             color: AppColors.primary,
             backgroundColor: AppColors.surface,
-            child: ListView(
-              physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isDesktop = constraints.maxWidth >= 800;
 
-              children: [
-                if (loading)
-                  const Center(
+                if (loading) {
+                  return const Center(
                     child: Padding(
                       padding: EdgeInsets.all(40),
                       child: CircularProgressIndicator(color: AppColors.primary),
                     ),
-                  )
-                else ...[
-                  _heroToday(),
-                  const SizedBox(height: 12),
-                  Row(
+                  );
+                }
+
+                if (isDesktop) {
+                  // DESKTOP LAYOUT : Grid 4 colonnes KPIs + 2 colonnes contenu principal
+                  return ListView(
+                    physics: const BouncingScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(28, 24, 28, 36),
                     children: [
-                      Expanded(
-                        child: _kpiTile(
-                          label: 'Cette semaine',
-                          value: formatFCFA(weekTotal),
-                          icon: Icons.date_range_rounded,
-                          color: AppColors.primary,
-                        ),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(flex: 2, child: _heroToday()),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            flex: 1,
+                            child: _kpiTile(
+                              label: 'Cette semaine',
+                              value: formatFCFA(weekTotal),
+                              icon: Icons.date_range_rounded,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            flex: 1,
+                            child: _kpiTile(
+                              label: 'Ce mois',
+                              value: formatFCFA(monthTotal),
+                              icon: Icons.calendar_month_rounded,
+                              color: AppColors.success,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _kpiTile(
-                          label: 'Ce mois',
-                          value: formatFCFA(monthTotal),
-                          icon: Icons.calendar_month_rounded,
-                          color: AppColors.success,
-                        ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _kpiTile(
+                              label: 'Panier moyen',
+                              value: formatFCFA(_avgBasket),
+                              icon: Icons.shopping_bag_rounded,
+                              color: const Color(0xFF06B6D4),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: _kpiTile(
+                              label: 'Ventes / semaine',
+                              value: '$weekCount',
+                              icon: Icons.trending_up_rounded,
+                              color: AppColors.accent,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: _miniStatCard('$productCount', 'Produits en stock', Icons.inventory_2_rounded, AppColors.primaryLight),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: _miniStatCard('$customerCount', 'Clients enregistrés', Icons.people_alt_rounded, AppColors.accentLight),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // COLONNE GAUCHE (Santé stock & Alertes)
+                          Expanded(
+                            flex: 5,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _sectionTitle('Vue d\'ensemble & Santé Stock'),
+                                const SizedBox(height: 14),
+                                Row(
+                                  children: [
+                                    Expanded(child: _miniStatCard('$salesCount', 'Ventes du mois', Icons.receipt_long_rounded, const Color(0xFF60A5FA))),
+                                    const SizedBox(width: 12),
+                                    Expanded(child: _miniStatCard('$outOfStockCount', 'Ruptures de stock', Icons.block_rounded, AppColors.danger)),
+                                  ],
+                                ),
+                                const SizedBox(height: 14),
+                                _stockHealthCard(),
+                                if (outOfStockCount > 0) ...[
+                                  const SizedBox(height: 14),
+                                  _alertCard(
+                                    title: 'Rupture de stock',
+                                    message: '$outOfStockCount produit(s) à 0 — réapprovisionnement requis.',
+                                    color: AppColors.danger,
+                                    icon: Icons.remove_shopping_cart_rounded,
+                                    onTap: () => widget.onQuickAction?.call('view_products'),
+                                  ),
+                                ],
+                                if (lowStockCount > 0) ...[
+                                  const SizedBox(height: 12),
+                                  _alertCard(
+                                    title: 'Stock faible',
+                                    message: '$lowStockCount produit(s) avec 3 unités ou moins.',
+                                    color: AppColors.warning,
+                                    icon: Icons.warning_amber_rounded,
+                                    onTap: () => widget.onQuickAction?.call('view_products'),
+                                  ),
+                                ],
+                                const SizedBox(height: 24),
+                                _sectionTitle('Actions rapides'),
+                                const SizedBox(height: 14),
+                                _buildQuickActions(),
+                              ],
+                            ),
+                          ),
+
+                          const SizedBox(width: 24),
+
+                          // COLONNE DROITE (Top produits & Dernières ventes)
+                          Expanded(
+                            flex: 6,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _sectionTitle('Meilleures ventes du mois'),
+                                const SizedBox(height: 14),
+                                if (topProducts.isEmpty)
+                                  _emptyHint('Les produits les plus vendus apparaîtront ici.')
+                                else
+                                  ...topProducts.asMap().entries.map((e) => _topProductRow(e.key, e.value)),
+                                const SizedBox(height: 24),
+                                Row(
+                                  children: [
+                                    Expanded(child: _sectionTitle('Dernières ventes')),
+                                    if (recentSales.isNotEmpty)
+                                      GestureDetector(
+                                        onTap: () => widget.onQuickAction?.call('view_sales'),
+                                        child: Text(
+                                          'Tout voir',
+                                          style: GoogleFonts.outfit(color: AppColors.primary, fontWeight: FontWeight.w700, fontSize: 13),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                const SizedBox(height: 14),
+                                if (recentSales.isEmpty)
+                                  _emptyHint('Aucune vente pour le moment.\nLancez la première depuis les actions rapides.')
+                                else
+                                  ...recentSales.map(_recentSaleRow),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _kpiTile(
-                          label: 'Panier moyen',
-                          value: formatFCFA(_avgBasket),
-                          icon: Icons.shopping_bag_rounded,
-                          color: const Color(0xFF06B6D4),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _kpiTile(
-                          label: 'Ventes / semaine',
-                          value: '$weekCount',
-                          icon: Icons.trending_up_rounded,
-                          color: AppColors.accent,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 22),
-                  _sectionTitle('Vue d\'ensemble'),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(child: _miniStatCard('$productCount', 'Produits', Icons.inventory_2_rounded, AppColors.primaryLight)),
-                      const SizedBox(width: 10),
-                      Expanded(child: _miniStatCard('$customerCount', 'Clients', Icons.people_alt_rounded, AppColors.accentLight)),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(child: _miniStatCard('$salesCount', 'Ventes / mois', Icons.receipt_long_rounded, const Color(0xFF60A5FA))),
-                      const SizedBox(width: 10),
-                      Expanded(child: _miniStatCard('$outOfStockCount', 'Ruptures', Icons.block_rounded, AppColors.danger)),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  _stockHealthCard(),
-                  if (outOfStockCount > 0) ...[
-                    const SizedBox(height: 16),
-                    _alertCard(
-                      title: 'Rupture de stock',
-                      message: '$outOfStockCount produit(s) à 0 — ventes bloquées jusqu\'au réapprovisionnement.',
-                      color: AppColors.danger,
-                      icon: Icons.remove_shopping_cart_rounded,
-                      onTap: () => widget.onQuickAction?.call('view_products'),
-                    ),
-                  ],
-                  if (lowStockCount > 0) ...[
-                    const SizedBox(height: 10),
-                    _alertCard(
-                      title: 'Stock faible',
-                      message: '$lowStockCount produit(s) avec 3 unités ou moins.',
-                      color: AppColors.warning,
-                      icon: Icons.warning_amber_rounded,
-                      onTap: () => widget.onQuickAction?.call('view_products'),
-                    ),
-                  ],
-                  const SizedBox(height: 22),
-                  _sectionTitle('Meilleures ventes du mois'),
-                  const SizedBox(height: 12),
-                  if (topProducts.isEmpty)
-                    _emptyHint('Les produits les plus vendus apparaîtront ici.')
-                  else
-                    ...topProducts.asMap().entries.map((e) => _topProductRow(e.key, e.value)),
-                  const SizedBox(height: 22),
-                  Row(
-                    children: [
-                      Expanded(child: _sectionTitle('Dernières ventes')),
-                      if (recentSales.isNotEmpty)
-                        GestureDetector(
-                          onTap: () => widget.onQuickAction?.call('view_sales'),
-                          child: Text(
-                            'Tout voir',
-                            style: GoogleFonts.outfit(color: AppColors.primary, fontWeight: FontWeight.w700, fontSize: 12),
+                  );
+                }
+
+                // LAYOUT MOBILE
+                return ListView(
+                  physics: const BouncingScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+                  children: [
+                    _heroToday(),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _kpiTile(
+                            label: 'Cette semaine',
+                            value: formatFCFA(weekTotal),
+                            icon: Icons.date_range_rounded,
+                            color: AppColors.primary,
                           ),
                         ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _kpiTile(
+                            label: 'Ce mois',
+                            value: formatFCFA(monthTotal),
+                            icon: Icons.calendar_month_rounded,
+                            color: AppColors.success,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _kpiTile(
+                            label: 'Panier moyen',
+                            value: formatFCFA(_avgBasket),
+                            icon: Icons.shopping_bag_rounded,
+                            color: const Color(0xFF06B6D4),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _kpiTile(
+                            label: 'Ventes / semaine',
+                            value: '$weekCount',
+                            icon: Icons.trending_up_rounded,
+                            color: AppColors.accent,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 22),
+                    _sectionTitle('Vue d\'ensemble'),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(child: _miniStatCard('$productCount', 'Produits', Icons.inventory_2_rounded, AppColors.primaryLight)),
+                        const SizedBox(width: 10),
+                        Expanded(child: _miniStatCard('$customerCount', 'Clients', Icons.people_alt_rounded, AppColors.accentLight)),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(child: _miniStatCard('$salesCount', 'Ventes / mois', Icons.receipt_long_rounded, const Color(0xFF60A5FA))),
+                        const SizedBox(width: 10),
+                        Expanded(child: _miniStatCard('$outOfStockCount', 'Ruptures', Icons.block_rounded, AppColors.danger)),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    _stockHealthCard(),
+                    if (outOfStockCount > 0) ...[
+                      const SizedBox(height: 16),
+                      _alertCard(
+                        title: 'Rupture de stock',
+                        message: '$outOfStockCount produit(s) à 0 — ventes bloquées jusqu\'au réapprovisionnement.',
+                        color: AppColors.danger,
+                        icon: Icons.remove_shopping_cart_rounded,
+                        onTap: () => widget.onQuickAction?.call('view_products'),
+                      ),
                     ],
-                  ),
-                  const SizedBox(height: 12),
-                  if (recentSales.isEmpty)
-                    _emptyHint('Aucune vente pour le moment.\nLancez la première depuis les actions rapides.')
-                  else
-                    ...recentSales.map(_recentSaleRow),
-                  const SizedBox(height: 22),
-                  _sectionTitle('Actions rapides'),
-                  const SizedBox(height: 12),
-                  _buildQuickActions(),
-                ],
-              ],
+                    if (lowStockCount > 0) ...[
+                      const SizedBox(height: 10),
+                      _alertCard(
+                        title: 'Stock faible',
+                        message: '$lowStockCount produit(s) avec 3 unités ou moins.',
+                        color: AppColors.warning,
+                        icon: Icons.warning_amber_rounded,
+                        onTap: () => widget.onQuickAction?.call('view_products'),
+                      ),
+                    ],
+                    const SizedBox(height: 22),
+                    _sectionTitle('Meilleures ventes du mois'),
+                    const SizedBox(height: 12),
+                    if (topProducts.isEmpty)
+                      _emptyHint('Les produits les plus vendus apparaîtront ici.')
+                    else
+                      ...topProducts.asMap().entries.map((e) => _topProductRow(e.key, e.value)),
+                    const SizedBox(height: 22),
+                    Row(
+                      children: [
+                        Expanded(child: _sectionTitle('Dernières ventes')),
+                        if (recentSales.isNotEmpty)
+                          GestureDetector(
+                            onTap: () => widget.onQuickAction?.call('view_sales'),
+                            child: Text(
+                              'Tout voir',
+                              style: GoogleFonts.outfit(color: AppColors.primary, fontWeight: FontWeight.w700, fontSize: 12),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    if (recentSales.isEmpty)
+                      _emptyHint('Aucune vente pour le moment.\nLancez la première depuis les actions rapides.')
+                    else
+                      ...recentSales.map(_recentSaleRow),
+                    const SizedBox(height: 22),
+                    _sectionTitle('Actions rapides'),
+                    const SizedBox(height: 12),
+                    _buildQuickActions(),
+                  ],
+                );
+              },
             ),
           ),
         ),
+
       ],
     );
   }
