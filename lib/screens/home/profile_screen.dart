@@ -1,7 +1,12 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
+import 'package:file_picker/file_picker.dart';
 import '../../config/theme.dart';
+import '../../services/backup_service.dart';
 import '../../services/database_service.dart';
+
 
 class ProfileScreen extends StatefulWidget {
   final VoidCallback? onProfileUpdated;
@@ -11,11 +16,19 @@ class ProfileScreen extends StatefulWidget {
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> {
+class _ProfileScreenState extends State<ProfileScreen>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   final nameController = TextEditingController();
+
   final phoneController = TextEditingController();
+  final addressController = TextEditingController();
   bool _saving = false;
   bool _loading = true;
+
+  SubscriptionInfo? _subInfo;
 
   @override
   void initState() {
@@ -25,21 +38,184 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _loadProfile() async {
     final profile = await DatabaseService.getShopProfile();
+    final sub = await DatabaseService.getSubscriptionStatus();
     if (!mounted) return;
-    nameController.text = profile['name'] ?? 'Tembs';
+    nameController.text = profile['name'] ?? '';
     phoneController.text = profile['phone'] ?? '';
-    setState(() => _loading = false);
+    addressController.text = profile['address'] ?? '';
+    setState(() {
+      _subInfo = sub;
+      _loading = false;
+    });
+  }
+
+  Future<void> _exportData() async {
+    setState(() => _saving = true);
+    try {
+      final path = await BackupService.exportData();
+      if (!mounted) return;
+      final shouldShare = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: AppColors.border)),
+          title: Text('Export réussi !', style: GoogleFonts.outfit(color: AppColors.text, fontWeight: FontWeight.w700)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Fichier sauvegardé dans Téléchargements :', style: GoogleFonts.outfit(color: AppColors.textMuted, fontSize: 13)),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: AppColors.surfaceAlt, borderRadius: BorderRadius.circular(10)),
+                child: Text(path.split('/').last, style: GoogleFonts.outfit(color: AppColors.primary, fontSize: 12, fontWeight: FontWeight.w700)),
+              ),
+              const SizedBox(height: 12),
+              Text('Voulez-vous aussi partager ce fichier (WhatsApp, Bluetooth, etc.) ?', style: GoogleFonts.outfit(color: AppColors.textMuted, fontSize: 13)),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Non, fermer', style: GoogleFonts.outfit(color: AppColors.textMuted))),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(ctx, true),
+              icon: const Icon(Icons.share_rounded, size: 16),
+              label: Text('Partager', style: GoogleFonts.outfit(fontWeight: FontWeight.w700)),
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+            ),
+          ],
+        ),
+      );
+      if (shouldShare == true) await BackupService.shareBackup(path);
+    } catch (e) {
+      _showMessage('Erreur export : $e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _importData() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: AppColors.border)),
+        title: Text('Importer des données', style: GoogleFonts.outfit(color: AppColors.text, fontWeight: FontWeight.w700)),
+        content: Text(
+          'Sélectionnez votre fichier de sauvegarde (.json). Toutes les données actuelles (produits, clients, ventes) seront remplacées par celles du fichier importé.\n\nVotre abonnement ne sera pas affecté.',
+          style: GoogleFonts.outfit(color: AppColors.textMuted, fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Annuler', style: GoogleFonts.outfit(color: AppColors.textMuted))),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.folder_open_rounded, size: 16),
+            label: Text('Parcourir le téléphone', style: GoogleFonts.outfit(fontWeight: FontWeight.w700)),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    try {
+      final pickerResult = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+      );
+
+      if (pickerResult == null || pickerResult.files.isEmpty || pickerResult.files.single.path == null) {
+        return;
+      }
+
+      final selectedPath = pickerResult.files.single.path!;
+      setState(() => _saving = true);
+      final file = File(selectedPath);
+      if (!await file.exists()) {
+        _showMessage('❌ Fichier introuvable.');
+        return;
+      }
+      final content = await file.readAsString();
+      final result = await BackupService.importData(content);
+      if (!mounted) return;
+      _showMessage(result.message);
+      if (result.success) {
+        _loadProfile();
+        widget.onProfileUpdated?.call();
+      }
+    } catch (e) {
+      _showMessage('Erreur lors du choix du fichier : $e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+
+  Future<void> _rechargeLicenseDialog() async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: AppColors.border)),
+        title: Text('Recharger ma licence', style: GoogleFonts.outfit(color: AppColors.text, fontWeight: FontWeight.w700)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Saisissez votre code de recharge (ex: 562365 pour 1 mois ou 214563 pour 3 mois)',
+              style: GoogleFonts.outfit(color: AppColors.textMuted, fontSize: 13),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              style: GoogleFonts.outfit(color: AppColors.text, fontWeight: FontWeight.w800, fontSize: 18, letterSpacing: 3),
+              decoration: const InputDecoration(
+                hintText: '••••••',
+                prefixIcon: Icon(Icons.key_rounded, size: 20),
+                counterText: '',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Annuler')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Valider'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && result.isNotEmpty) {
+      final days = await DatabaseService.activateLicenseCode(result);
+      if (days != null) {
+        _showMessage('✅ Licence rechargée de $days jours avec succès !');
+        _loadProfile();
+      } else {
+        _showMessage('❌ Code de recharge invalide.');
+      }
+    }
   }
 
   Future<void> _saveProfile() async {
+    if (nameController.text.trim().isEmpty) {
+      _showMessage('Le nom de la boutique ne peut pas être vide.');
+      return;
+    }
     setState(() => _saving = true);
     await DatabaseService.saveShopProfile(
       name: nameController.text,
       phone: phoneController.text,
+      address: addressController.text,
     );
     if (!mounted) return;
     setState(() => _saving = false);
-    _showMessage('✅ Modifications enregistrées !');
+    _showMessage('✅ Modifications de la boutique enregistrées !');
     widget.onProfileUpdated?.call();
   }
 
@@ -47,6 +223,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void dispose() {
     nameController.dispose();
     phoneController.dispose();
+    addressController.dispose();
     super.dispose();
   }
 
@@ -111,6 +288,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -118,7 +296,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final initials = name.trim().split(' ').map((w) => w[0].toUpperCase()).take(2).join();
 
     return ListView(
+      physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+
       children: [
         // Header profil
         Center(
@@ -218,6 +398,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 hint: '+223 XX XX XX XX',
                 keyboardType: TextInputType.phone,
               ),
+              const SizedBox(height: 16),
+              _divider(),
+              const SizedBox(height: 16),
+              _infoField(
+                controller: addressController,
+                label: 'Quartier / Emplacement',
+                icon: Icons.location_on_rounded,
+                hint: 'Ex: Bamako, Badalabougou',
+                keyboardType: TextInputType.streetAddress,
+              ),
             ],
           ),
         ),
@@ -227,6 +417,115 @@ class _ProfileScreenState extends State<ProfileScreen> {
           onPressed: _saveProfile,
           loading: _saving,
           icon: Icons.save_rounded,
+        ),
+
+        const SizedBox(height: 24),
+
+        // Section Licence & Abonnement
+        _sectionTitle('Licence & Abonnement'),
+        const SizedBox(height: 12),
+        GlassCard(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 40, height: 40,
+                    decoration: BoxDecoration(
+                      color: (_subInfo?.isExpired ?? false)
+                          ? AppColors.dangerLight
+                          : AppColors.primary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      (_subInfo?.isExpired ?? false)
+                          ? Icons.warning_amber_rounded
+                          : Icons.workspace_premium_rounded,
+                      color: (_subInfo?.isExpired ?? false) ? AppColors.danger : AppColors.primary,
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          (_subInfo?.isExpired ?? false) ? 'Abonnement expiré' : 'Licence Active',
+                          style: GoogleFonts.outfit(color: AppColors.text, fontWeight: FontWeight.w700, fontSize: 15),
+                        ),
+                        Text(
+                          _subInfo?.expiryDate != null
+                              ? 'Expire le ${DateFormat('dd/MM/yyyy').format(_subInfo!.expiryDate!)}'
+                              : 'Aucune licence active',
+                          style: GoogleFonts.outfit(color: AppColors.textMuted, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (_subInfo?.expiryDate != null && !(_subInfo?.isExpired ?? false))
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.successLight,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '${_subInfo!.remainingDays}j restant${_subInfo!.remainingDays > 1 ? 's' : ''}',
+                        style: GoogleFonts.outfit(color: AppColors.success, fontWeight: FontWeight.w700, fontSize: 12),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _rechargeLicenseDialog,
+                  icon: const Icon(Icons.key_rounded, size: 18, color: AppColors.primary),
+                  label: Text('Recharger avec un code', style: GoogleFonts.outfit(color: AppColors.primary, fontWeight: FontWeight.w700)),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppColors.primary, width: 1.5),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 24),
+
+        // Section Sauvegarde & Restauration
+        _sectionTitle('Sauvegarde & Restauration'),
+        const SizedBox(height: 12),
+        GlassCard(
+          padding: EdgeInsets.zero,
+          child: Column(
+            children: [
+              _menuItem(
+                icon: Icons.cloud_download_rounded,
+                iconColor: AppColors.primary,
+                title: 'Exporter toutes les données',
+                trailing: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(color: AppColors.cardViolet, borderRadius: BorderRadius.circular(6)),
+                  child: Text('JSON', style: GoogleFonts.outfit(color: AppColors.primary, fontWeight: FontWeight.w700, fontSize: 10)),
+                ),
+                onTap: _exportData,
+              ),
+              _divider(),
+              _menuItem(
+                icon: Icons.cloud_upload_rounded,
+                iconColor: AppColors.accent,
+                title: 'Importer une sauvegarde',
+                trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.textMuted, size: 20),
+                onTap: _importData,
+              ),
+            ],
+          ),
         ),
 
         const SizedBox(height: 24),
@@ -411,7 +710,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
             trailing ??
-                Icon(Icons.chevron_right_rounded, color: AppColors.textMuted, size: 20),
+                const Icon(Icons.chevron_right_rounded, color: AppColors.textMuted, size: 20),
           ],
         ),
       ),

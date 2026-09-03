@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import '../../config/theme.dart';
 import '../../models/models.dart';
 import '../../services/database_service.dart';
@@ -16,8 +17,13 @@ class ProductsScreen extends StatefulWidget {
   State<ProductsScreen> createState() => ProductsScreenState();
 }
 
-class ProductsScreenState extends State<ProductsScreen> {
+class ProductsScreenState extends State<ProductsScreen>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   List<Product> products = [];
+
   List<Category> categories = [];
   bool loading = true;
   String searchQuery = '';
@@ -61,6 +67,18 @@ class ProductsScreenState extends State<ProductsScreen> {
     return AppColors.success;
   }
 
+  void openCategoryManagerSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => CategoryManagerSheet(
+        categories: categories,
+        onCategoriesChanged: loadData,
+      ),
+    );
+  }
+
   void openAddSheet() {
     showModalBottomSheet(
       context: context,
@@ -81,13 +99,37 @@ class ProductsScreenState extends State<ProductsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     return Column(
+
       children: [
         ScreenHeader(
           title: 'Produits',
           subtitle: '${products.length} produit${products.length > 1 ? 's' : ''} au catalogue',
           icon: const Icon(Icons.inventory_2_rounded, color: Colors.white, size: 24),
           actions: [
+            GestureDetector(
+              onTap: openCategoryManagerSheet,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.category_rounded, color: Colors.white, size: 16),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Catégories',
+                      style: GoogleFonts.outfit(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
             GestureDetector(
               onTap: openAddSheet,
               child: Container(
@@ -185,12 +227,14 @@ class ProductsScreenState extends State<ProductsScreen> {
                       onRefresh: loadData,
                       color: AppColors.primary,
                       child: GridView.builder(
+                        physics: const BouncingScrollPhysics(),
                         padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+
                         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 2,
                           crossAxisSpacing: 12,
                           mainAxisSpacing: 12,
-                          childAspectRatio: 0.8,
+                          childAspectRatio: 0.72,
                         ),
                         itemCount: filtered.length,
                         itemBuilder: (context, i) {
@@ -521,8 +565,18 @@ class _AddProductSheetState extends State<AddProductSheet> {
   Future<String?> uploadImage() async {
     if (imageUrlOverride != null && imageUrlOverride!.isNotEmpty) return imageUrlOverride;
     if (imageFile == null) return null;
-    // Image stored locally — return local file path
-    return imageFile!.path;
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      final imagesDir = Directory('${appDir.path}/product_images');
+      if (!await imagesDir.exists()) {
+        await imagesDir.create(recursive: true);
+      }
+      final fileName = 'img_${DateTime.now().millisecondsSinceEpoch}.png';
+      final savedFile = await imageFile!.copy('${imagesDir.path}/$fileName');
+      return savedFile.path;
+    } catch (_) {
+      return imageFile!.path;
+    }
   }
 
   Future<void> save() async {
@@ -789,3 +843,164 @@ class _AddProductSheetState extends State<AddProductSheet> {
     style: GoogleFonts.outfit(color: AppColors.textSubtle, fontSize: 13, fontWeight: FontWeight.w600),
   );
 }
+
+class CategoryManagerSheet extends StatefulWidget {
+  final List<Category> categories;
+  final VoidCallback onCategoriesChanged;
+
+  const CategoryManagerSheet({
+    super.key,
+    required this.categories,
+    required this.onCategoriesChanged,
+  });
+
+  @override
+  State<CategoryManagerSheet> createState() => _CategoryManagerSheetState();
+}
+
+class _CategoryManagerSheetState extends State<CategoryManagerSheet> {
+  final nameController = TextEditingController();
+  late List<Category> categories;
+  bool adding = false;
+
+  @override
+  void initState() {
+    super.initState();
+    categories = List.from(widget.categories);
+  }
+
+  @override
+  void dispose() {
+    nameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> addCat() async {
+    final name = nameController.text.trim();
+    if (name.isEmpty) return;
+    setState(() => adding = true);
+    try {
+      final cat = await DatabaseService.insertCategory(name);
+      setState(() {
+        categories.add(cat);
+        nameController.clear();
+        adding = false;
+      });
+      widget.onCategoriesChanged();
+    } catch (e) {
+      setState(() => adding = false);
+    }
+  }
+
+  Future<void> deleteCat(Category cat) async {
+    try {
+      await DatabaseService.deleteCategory(cat.id);
+      setState(() {
+        categories.removeWhere((c) => c.id == cat.id);
+      });
+      widget.onCategoriesChanged();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur : $e'), backgroundColor: AppColors.danger),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.75,
+      decoration: const BoxDecoration(
+        color: AppColors.bg,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      padding: EdgeInsets.only(
+        top: 20,
+        left: 20,
+        right: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2))),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: Text('Gestion des catégories', style: GoogleFonts.outfit(color: AppColors.text, fontSize: 18, fontWeight: FontWeight.w800)),
+              ),
+              IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close_rounded)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: nameController,
+                  style: GoogleFonts.outfit(color: AppColors.text),
+                  decoration: const InputDecoration(
+                    hintText: 'Nom de la nouvelle catégorie...',
+                    prefixIcon: Icon(Icons.label_outline_rounded, size: 20),
+                  ),
+                  onSubmitted: (_) => addCat(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: adding ? null : addCat,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: adding
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : Text('Ajouter', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Catégories existantes (${categories.length})',
+            style: GoogleFonts.outfit(color: AppColors.textSubtle, fontSize: 12, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: categories.isEmpty
+                ? Center(child: Text('Aucune catégorie enregistrée', style: GoogleFonts.outfit(color: AppColors.textMuted)))
+                : ListView.builder(
+                    itemCount: categories.length,
+                    itemBuilder: (context, i) {
+                      final c = categories[i];
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: ListTile(
+                          title: Text(c.name, style: GoogleFonts.outfit(fontWeight: FontWeight.w600, color: AppColors.text)),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger, size: 20),
+                            onPressed: () => deleteCat(c),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+

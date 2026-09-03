@@ -14,8 +14,13 @@ class CustomersScreen extends StatefulWidget {
   State<CustomersScreen> createState() => CustomersScreenState();
 }
 
-class CustomersScreenState extends State<CustomersScreen> {
+class CustomersScreenState extends State<CustomersScreen>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   List<Customer> customers = [];
+
   bool loading = true;
   String searchQuery = '';
 
@@ -66,7 +71,7 @@ class CustomersScreenState extends State<CustomersScreen> {
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
+          const SnackBar(
             content: Text('WhatsApp non disponible pour ce numéro.'),
             backgroundColor: AppColors.danger,
           ),
@@ -85,7 +90,9 @@ class CustomersScreenState extends State<CustomersScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     return Column(
+
       children: [
         ScreenHeader(
           title: 'Clients',
@@ -210,7 +217,7 @@ class CustomersScreenState extends State<CustomersScreen> {
                                             const SizedBox(height: 2),
                                             Row(
                                               children: [
-                                                Icon(Icons.phone_rounded, size: 12, color: AppColors.textMuted),
+                                                const Icon(Icons.phone_rounded, size: 12, color: AppColors.textMuted),
                                                 const SizedBox(width: 4),
                                                 Text(c.phone!, style: GoogleFonts.outfit(color: AppColors.textMuted, fontSize: 12)),
                                               ],
@@ -220,7 +227,7 @@ class CustomersScreenState extends State<CustomersScreen> {
                                             const SizedBox(height: 2),
                                             Row(
                                               children: [
-                                                Icon(Icons.location_on_rounded, size: 12, color: AppColors.textMuted),
+                                                const Icon(Icons.location_on_rounded, size: 12, color: AppColors.textMuted),
                                                 const SizedBox(width: 4),
                                                 Expanded(child: Text(c.address!, style: GoogleFonts.outfit(color: AppColors.textMuted, fontSize: 12), overflow: TextOverflow.ellipsis)),
                                               ],
@@ -342,7 +349,7 @@ class _AddCustomerSheetState extends State<AddCustomerSheet> {
   Future<void> save() async {
     if (nameController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Renseigne le nom du client.'), backgroundColor: AppColors.danger),
+        const SnackBar(content: Text('Renseigne le nom du client.'), backgroundColor: AppColors.danger),
       );
       return;
     }

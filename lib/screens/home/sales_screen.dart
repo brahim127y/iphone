@@ -17,8 +17,13 @@ class SalesScreen extends StatefulWidget {
   State<SalesScreen> createState() => SalesScreenState();
 }
 
-class SalesScreenState extends State<SalesScreen> {
+class SalesScreenState extends State<SalesScreen>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   List<Sale> sales = [];
+
   List<Product> products = [];
   List<Customer> customers = [];
   bool loading = true;
@@ -69,6 +74,34 @@ class SalesScreenState extends State<SalesScreen> {
     );
   }
 
+  Future<void> openSaleTicket(Sale s) async {
+    final items = await DatabaseService.getSaleItems(s.id);
+    if (!mounted) return;
+    if (items.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Aucun article sur cette vente.'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+      return;
+    }
+    final profile = await DatabaseService.getShopProfile();
+    if (!mounted) return;
+    TicketGenerator.showTicket(
+      context: context,
+      lines: items.map(TicketLine.fromSaleItem).toList(),
+      total: s.total,
+      paymentMethod: s.paymentMethod,
+      shopName: profile['name'] ?? 'Ma Boutique',
+      shopPhone: profile['phone'],
+      shopAddress: profile['address'],
+      customerName: s.customerName,
+      createdAt: s.createdAt,
+      receiptNo: s.id.length > 6 ? s.id.substring(s.id.length - 6) : s.id,
+    );
+  }
+
   Color _paymentColor(String method) {
     switch (method.toLowerCase()) {
       case 'espèces': return AppColors.success;
@@ -81,7 +114,9 @@ class SalesScreenState extends State<SalesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     return Column(
+
       children: [
         ScreenHeader(
           title: 'Ventes',
@@ -206,7 +241,9 @@ class SalesScreenState extends State<SalesScreen> {
                                       childrenPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                                       children: daySales.map((s) {
                                         final pmColor = _paymentColor(s.paymentMethod);
-                                        return Container(
+                                        return GestureDetector(
+                                          onTap: () => openSaleTicket(s),
+                                          child: Container(
                                           margin: const EdgeInsets.only(bottom: 8),
                                           padding: const EdgeInsets.all(12),
                                           decoration: BoxDecoration(
@@ -247,8 +284,11 @@ class SalesScreenState extends State<SalesScreen> {
                                                 formatFCFA(s.total),
                                                 style: GoogleFonts.outfit(color: AppColors.primary, fontWeight: FontWeight.w800, fontSize: 14),
                                               ),
+                                              const SizedBox(width: 6),
+                                              const Icon(Icons.receipt_long_rounded, size: 16, color: AppColors.textMuted),
                                             ],
                                           ),
+                                        ),
                                         );
                                       }).toList(),
                                     ),
@@ -262,7 +302,9 @@ class SalesScreenState extends State<SalesScreen> {
                               itemBuilder: (context, i) {
                                 final s = sales[i];
                                 final pmColor = _paymentColor(s.paymentMethod);
-                                return Container(
+                                return GestureDetector(
+                                  onTap: () => openSaleTicket(s),
+                                  child: Container(
                                   margin: const EdgeInsets.only(bottom: 10),
                                   decoration: BoxDecoration(
                                     color: AppColors.surface,
@@ -302,7 +344,7 @@ class SalesScreenState extends State<SalesScreen> {
                                                   Row(
                                                     mainAxisSize: MainAxisSize.min,
                                                     children: [
-                                                      Icon(Icons.access_time_rounded, size: 11, color: AppColors.textMuted),
+                                                      const Icon(Icons.access_time_rounded, size: 11, color: AppColors.textMuted),
                                                       const SizedBox(width: 4),
                                                       Text(
                                                         '${s.createdAt.day}/${s.createdAt.month}/${s.createdAt.year}',
@@ -331,9 +373,12 @@ class SalesScreenState extends State<SalesScreen> {
                                           formatFCFA(s.total),
                                           style: GoogleFonts.outfit(color: AppColors.primary, fontWeight: FontWeight.w800, fontSize: 14),
                                         ),
+                                        const SizedBox(width: 4),
+                                        const Icon(Icons.chevron_right_rounded, color: AppColors.textMuted, size: 20),
                                       ],
                                     ),
                                   ),
+                                ),
                                 );
                               },
                             ),
@@ -372,11 +417,41 @@ class _NewSaleSheetState extends State<NewSaleSheet> {
 
   double get total => cart.fold(0, (sum, l) => sum + l.lineTotal);
 
-  List<Product> get filteredProducts => widget.products
-      .where((p) => p.name.toLowerCase().contains(productSearch.toLowerCase()))
-      .toList();
+  List<Product> get filteredProducts {
+    final q = productSearch.toLowerCase();
+    final list = widget.products.where((p) => p.name.toLowerCase().contains(q)).toList();
+    list.sort((a, b) {
+      if (a.quantity <= 0 && b.quantity > 0) return 1;
+      if (a.quantity > 0 && b.quantity <= 0) return -1;
+      return a.name.compareTo(b.name);
+    });
+    return list;
+  }
+
+  int _inCartQty(String productId) {
+    for (final line in cart) {
+      if (line.product.id == productId) return line.quantity;
+    }
+    return 0;
+  }
+
+  int _available(Product p) => p.quantity - _inCartQty(p.id);
+
+  void _stockDenied(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: AppColors.danger),
+    );
+  }
 
   void addToCart(Product p) {
+    if (p.quantity <= 0) {
+      _stockDenied('${p.name} est en rupture de stock. Vente refusée.');
+      return;
+    }
+    if (_available(p) <= 0) {
+      _stockDenied('Stock insuffisant pour ${p.name} (disponible : ${p.quantity}).');
+      return;
+    }
     setState(() {
       final existing = cart.where((l) => l.product.id == p.id).toList();
       if (existing.isNotEmpty) {
@@ -388,8 +463,14 @@ class _NewSaleSheetState extends State<NewSaleSheet> {
   }
 
   void changeQuantity(String productId, int delta) {
+    final line = cart.firstWhere((l) => l.product.id == productId);
+    if (delta > 0 && line.quantity + delta > line.product.quantity) {
+      _stockDenied(
+        'Stock insuffisant pour ${line.product.name} (disponible : ${line.product.quantity}).',
+      );
+      return;
+    }
     setState(() {
-      final line = cart.firstWhere((l) => l.product.id == productId);
       line.quantity += delta;
       if (line.quantity <= 0) cart.removeWhere((l) => l.product.id == productId);
     });
@@ -402,33 +483,60 @@ class _NewSaleSheetState extends State<NewSaleSheet> {
       );
       return;
     }
+    for (final line in cart) {
+      if (line.product.quantity <= 0) {
+        _stockDenied('${line.product.name} est en rupture de stock. Vente refusée.');
+        return;
+      }
+      if (line.quantity > line.product.quantity) {
+        _stockDenied(
+          'Stock insuffisant pour ${line.product.name} (disponible : ${line.product.quantity}).',
+        );
+        return;
+      }
+    }
+
     setState(() => saving = true);
 
-    await DatabaseService.insertSale(
-      customerId: selectedCustomer?.id,
-      customerName: selectedCustomer?.name,
-      customerPhone: selectedCustomer?.phone,
-      total: total,
-      paymentMethod: paymentMethod,
-      cartLines: cart,
-    );
+    final lines = cart.map(TicketLine.fromCart).toList();
+    final saleTotal = total;
+    final method = paymentMethod;
+    final customer = selectedCustomer;
 
-    setState(() => saving = false);
-    widget.onSaved();
-
-    final profile = await DatabaseService.getShopProfile();
-    final shopName = profile['name'] ?? 'Tembs';
-
-    if (mounted) {
-      Navigator.pop(context);
-      TicketGenerator.generateAndShare(
-        context: context,
+    try {
+      final sale = await DatabaseService.insertSale(
+        customerId: customer?.id,
+        customerName: customer?.name,
+        customerPhone: customer?.phone,
+        total: saleTotal,
+        paymentMethod: method,
         cartLines: cart,
-        total: total,
-        paymentMethod: paymentMethod,
-        shopName: shopName,
-        customer: selectedCustomer,
       );
+
+      widget.onSaved();
+
+      final profile = await DatabaseService.getShopProfile();
+
+      if (!mounted) return;
+      Navigator.pop(context);
+      TicketGenerator.showTicket(
+        context: context,
+        lines: lines,
+        total: saleTotal,
+        paymentMethod: method,
+        shopName: profile['name'] ?? 'Ma Boutique',
+        shopPhone: profile['phone'],
+        shopAddress: profile['address'],
+        customerName: customer?.name,
+        createdAt: sale.createdAt,
+        receiptNo: sale.id.length > 6 ? sale.id.substring(sale.id.length - 6) : sale.id,
+        justCreated: true,
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() => saving = false);
+        _stockDenied(e.toString().replaceFirst('Exception: ', ''));
+      }
     }
   }
 
@@ -479,10 +587,10 @@ class _NewSaleSheetState extends State<NewSaleSheet> {
                   TextField(
                     onChanged: (v) => setState(() => productSearch = v),
                     style: GoogleFonts.outfit(color: AppColors.text, fontSize: 14),
-                    decoration: InputDecoration(
+                    decoration: const InputDecoration(
                       hintText: 'Rechercher un produit...',
-                      prefixIcon: const Icon(Icons.search_rounded, size: 18),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      prefixIcon: Icon(Icons.search_rounded, size: 18),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                       fillColor: AppColors.surface,
                     ),
                   ),
@@ -490,7 +598,7 @@ class _NewSaleSheetState extends State<NewSaleSheet> {
 
                   // Liste produits (scrollable horizontalement)
                   SizedBox(
-                    height: 160,
+                    height: 176,
                     child: filteredProducts.isEmpty
                         ? Center(child: Text('Aucun produit', style: GoogleFonts.outfit(color: AppColors.textMuted)))
                         : ListView.builder(
@@ -499,6 +607,7 @@ class _NewSaleSheetState extends State<NewSaleSheet> {
                             itemBuilder: (context, i) {
                               final p = filteredProducts[i];
                               final inCart = cart.any((l) => l.product.id == p.id);
+                              final outOfStock = p.quantity <= 0;
                               return GestureDetector(
                                 onTap: () => addToCart(p),
                                 child: AnimatedContainer(
@@ -507,15 +616,27 @@ class _NewSaleSheetState extends State<NewSaleSheet> {
                                   margin: const EdgeInsets.only(right: 10),
                                   padding: const EdgeInsets.all(12),
                                   decoration: BoxDecoration(
-                                    color: inCart ? AppColors.cardViolet : AppColors.surface,
+                                    color: outOfStock
+                                        ? AppColors.dangerLight
+                                        : inCart
+                                            ? AppColors.cardViolet
+                                            : AppColors.surface,
                                     borderRadius: BorderRadius.circular(16),
                                     border: Border.all(
-                                      color: inCart ? AppColors.primary : AppColors.border,
-                                      width: inCart ? 2 : 1,
+                                      color: outOfStock
+                                          ? AppColors.danger
+                                          : inCart
+                                              ? AppColors.primary
+                                              : AppColors.border,
+                                      width: inCart || outOfStock ? 2 : 1,
                                     ),
-                                    boxShadow: inCart ? [BoxShadow(color: AppColors.primary.withValues(alpha: 0.15), blurRadius: 8)] : [],
+                                    boxShadow: inCart
+                                        ? [BoxShadow(color: AppColors.primary.withValues(alpha: 0.15), blurRadius: 8)]
+                                        : [],
                                   ),
-                                  child: Column(
+                                  child: Opacity(
+                                    opacity: outOfStock ? 0.55 : 1,
+                                    child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       ClipRRect(
@@ -532,7 +653,20 @@ class _NewSaleSheetState extends State<NewSaleSheet> {
                                       Text(p.name, style: GoogleFonts.outfit(color: AppColors.text, fontWeight: FontWeight.w600, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
                                       const SizedBox(height: 2),
                                       Text(formatFCFA(p.price), style: GoogleFonts.outfit(color: AppColors.primary, fontWeight: FontWeight.w700, fontSize: 11)),
+                                      Text(
+                                        outOfStock ? 'Rupture' : 'Stock : ${p.quantity}',
+                                        style: GoogleFonts.outfit(
+                                          color: outOfStock
+                                              ? AppColors.danger
+                                              : p.quantity <= 3
+                                                  ? AppColors.warning
+                                                  : AppColors.textMuted,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
                                     ],
+                                  ),
                                   ),
                                 ),
                               );
@@ -591,11 +725,27 @@ class _NewSaleSheetState extends State<NewSaleSheet> {
                                 child: Text('${l.quantity}', style: GoogleFonts.outfit(color: AppColors.text, fontWeight: FontWeight.w700, fontSize: 16)),
                               ),
                               GestureDetector(
-                                onTap: () => changeQuantity(l.product.id, 1),
+                                onTap: l.quantity >= l.product.quantity
+                                    ? null
+                                    : () => changeQuantity(l.product.id, 1),
                                 child: Container(
                                   width: 30, height: 30,
-                                  decoration: BoxDecoration(gradient: AppGradients.primary, borderRadius: BorderRadius.circular(8)),
-                                  child: const Icon(Icons.add_rounded, size: 16, color: Colors.white),
+                                  decoration: BoxDecoration(
+                                    gradient: l.quantity >= l.product.quantity
+                                        ? null
+                                        : AppGradients.primary,
+                                    color: l.quantity >= l.product.quantity
+                                        ? AppColors.surfaceAlt
+                                        : null,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Icon(
+                                    Icons.add_rounded,
+                                    size: 16,
+                                    color: l.quantity >= l.product.quantity
+                                        ? AppColors.textMuted
+                                        : Colors.white,
+                                  ),
                                 ),
                               ),
                             ],
@@ -607,18 +757,58 @@ class _NewSaleSheetState extends State<NewSaleSheet> {
                   const SizedBox(height: 20),
 
                   // Client
-                  _sectionLabel('Client (optionnel)'),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    height: 40,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      children: [
-                        _customerChip(null, selectedCustomer == null),
-                        ...widget.customers.map((c) => _customerChip(c, selectedCustomer?.id == c.id)),
-                      ],
-                    ),
+                  Row(
+                    children: [
+                      Expanded(child: _sectionLabel('Client (optionnel)')),
+                      if (widget.customers.isNotEmpty)
+                        GestureDetector(
+                          onTap: _openCustomerPickerModal,
+                          child: Text(
+                            'Rechercher (${widget.customers.length})',
+                            style: GoogleFonts.outfit(color: AppColors.primary, fontWeight: FontWeight.w700, fontSize: 12),
+                          ),
+                        ),
+                    ],
                   ),
+                  const SizedBox(height: 8),
+                  if (widget.customers.isEmpty)
+                    _customerChip(null, selectedCustomer == null)
+                  else
+                    SizedBox(
+                      height: 40,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        children: [
+                          _customerChip(null, selectedCustomer == null),
+                          if (selectedCustomer != null && !widget.customers.take(4).any((c) => c.id == selectedCustomer!.id))
+                            _customerChip(selectedCustomer, true),
+                          ...widget.customers.take(4).map((c) => _customerChip(c, selectedCustomer?.id == c.id)),
+                          if (widget.customers.length > 4)
+                            GestureDetector(
+                              onTap: _openCustomerPickerModal,
+                              child: Container(
+                                margin: const EdgeInsets.only(right: 8),
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: AppColors.surfaceAlt,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: AppColors.border),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.search_rounded, size: 14, color: AppColors.primary),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '+${widget.customers.length - 4} autres',
+                                      style: GoogleFonts.outfit(color: AppColors.primary, fontWeight: FontWeight.w600, fontSize: 12),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
 
                   const SizedBox(height: 20),
 
@@ -660,7 +850,7 @@ class _NewSaleSheetState extends State<NewSaleSheet> {
                   height: 52,
                   child: OutlinedButton(
                     onPressed: () => Navigator.pop(context),
-                    child: const Icon(Icons.close_rounded, color: AppColors.textMuted),
+                    child: Text('Annuler', style: GoogleFonts.outfit(color: AppColors.textMuted, fontWeight: FontWeight.w600)),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -676,6 +866,21 @@ class _NewSaleSheetState extends State<NewSaleSheet> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _openCustomerPickerModal() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => CustomerPickerSheet(
+        customers: widget.customers,
+        selectedCustomer: selectedCustomer,
+        onSelect: (c) {
+          setState(() => selectedCustomer = c);
+        },
       ),
     );
   }
@@ -700,6 +905,101 @@ class _NewSaleSheetState extends State<NewSaleSheet> {
           c?.name ?? 'De passage',
           style: GoogleFonts.outfit(color: selected ? Colors.white : AppColors.textMuted, fontWeight: FontWeight.w600, fontSize: 13),
         ),
+      ),
+    );
+  }
+}
+
+class CustomerPickerSheet extends StatefulWidget {
+  final List<Customer> customers;
+  final Customer? selectedCustomer;
+  final Function(Customer?) onSelect;
+
+  const CustomerPickerSheet({
+    super.key,
+    required this.customers,
+    required this.selectedCustomer,
+    required this.onSelect,
+  });
+
+  @override
+  State<CustomerPickerSheet> createState() => _CustomerPickerSheetState();
+}
+
+class _CustomerPickerSheetState extends State<CustomerPickerSheet> {
+  String search = '';
+
+  List<Customer> get filtered {
+    final q = search.toLowerCase().trim();
+    if (q.isEmpty) return widget.customers;
+    return widget.customers.where((c) {
+      final nameMatch = c.name.toLowerCase().contains(q);
+      final phoneMatch = (c.phone ?? '').contains(q);
+      return nameMatch || phoneMatch;
+    }).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.75,
+      decoration: const BoxDecoration(
+        color: AppColors.bg,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        children: [
+          Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: Text('Sélectionner un client', style: GoogleFonts.outfit(color: AppColors.text, fontSize: 18, fontWeight: FontWeight.w800)),
+              ),
+              IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close_rounded)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            onChanged: (v) => setState(() => search = v),
+            style: GoogleFonts.outfit(color: AppColors.text),
+            decoration: const InputDecoration(
+              hintText: 'Rechercher par nom ou numéro...',
+              prefixIcon: Icon(Icons.search_rounded, size: 20),
+            ),
+          ),
+          const SizedBox(height: 12),
+          ListTile(
+            title: Text('Client de passage (Anonyme)', style: GoogleFonts.outfit(fontWeight: FontWeight.w600, color: AppColors.text)),
+            trailing: widget.selectedCustomer == null ? const Icon(Icons.check_circle_rounded, color: AppColors.primary) : null,
+            onTap: () {
+              widget.onSelect(null);
+              Navigator.pop(context);
+            },
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: filtered.isEmpty
+                ? Center(child: Text('Aucun client trouvé', style: GoogleFonts.outfit(color: AppColors.textMuted)))
+                : ListView.builder(
+                    itemCount: filtered.length,
+                    itemBuilder: (context, i) {
+                      final c = filtered[i];
+                      final isSelected = widget.selectedCustomer?.id == c.id;
+                      return ListTile(
+                        title: Text(c.name, style: GoogleFonts.outfit(fontWeight: FontWeight.w700, color: AppColors.text)),
+                        subtitle: c.phone != null ? Text(c.phone!, style: GoogleFonts.outfit(color: AppColors.textMuted, fontSize: 12)) : null,
+                        trailing: isSelected ? const Icon(Icons.check_circle_rounded, color: AppColors.primary) : null,
+                        onTap: () {
+                          widget.onSelect(c);
+                          Navigator.pop(context);
+                        },
+                      );
+                    },
+                  ),
+          ),
+        ],
       ),
     );
   }

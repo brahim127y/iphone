@@ -8,7 +8,9 @@
     <application
         android:label="Tembs"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round">
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -30,7 +32,12 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Désactiver Impeller sur Android pour assurer 100% de compatibilité sur tous les processeurs/téléphones -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="false" />
     </application>
+
 
     <queries>
         <!-- Pour url_launcher / WhatsApp -->

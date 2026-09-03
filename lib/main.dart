@@ -3,16 +3,27 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'config/theme.dart';
-import 'screens/home/home_shell.dart';
-import 'screens/home/home_shell_ios.dart';
+import 'screens/licence/subscription_lock_screen.dart';
 import 'services/database_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Initialize local database
-  await DatabaseService.database;
+
+  // Protection contre les plantages inattendus au démarrage
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details);
+    debugPrint('Tembs Flutter Error: ${details.exception}');
+  };
+
+  try {
+    await DatabaseService.database;
+  } catch (e) {
+    debugPrint('Erreur initialisation base de données: $e');
+  }
+
   runApp(const TembsApp());
 }
+
 
 class TembsApp extends StatelessWidget {
   const TembsApp({super.key});
@@ -54,11 +65,10 @@ class TembsApp extends StatelessWidget {
             ),
           ),
         ),
-        home: const HomeShellIOS(),
+        home: const SubscriptionLockScreen(),
       );
     }
 
-    // Android / autres plateformes → Material Design (inchangé)
     return MaterialApp(
       title: 'Tembs',
       debugShowCheckedModeBanner: false,
@@ -72,7 +82,7 @@ class TembsApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const HomeShell(),
+      home: const SubscriptionLockScreen(),
     );
   }
 }

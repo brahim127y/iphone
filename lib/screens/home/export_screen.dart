@@ -1,10 +1,13 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../../config/theme.dart';
 import '../../services/database_service.dart';
+import '../widgets/ticket_generator.dart';
 
 const months = [
   'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
@@ -20,8 +23,12 @@ class ExportScreen extends StatefulWidget {
 }
 
 class _ExportScreenState extends State<ExportScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   final now = DateTime.now();
+
   String mode = 'month';
   late int selectedMonth;
   late int selectedYear;
@@ -80,7 +87,7 @@ class _ExportScreenState extends State<ExportScreen>
     }
   }
 
-  Future<void> generatePdf() async {
+  Future<void> _buildAndSavePdf({bool share = false}) async {
     setState(() => loading = true);
     try {
       final start = mode == 'month'
@@ -126,8 +133,10 @@ class _ExportScreenState extends State<ExportScreen>
       final top10 = topProducts.take(10).toList();
       final periodLabel = mode == 'month' ? '${months[selectedMonth]} $selectedYear' : 'Année $selectedYear';
       final profile = await DatabaseService.getShopProfile();
-      final shopName = (profile['name'] ?? 'TEMBS').toUpperCase();
-
+      final rawShopName = profile['name'] ?? '';
+      final shopName = rawShopName.trim().isEmpty ? 'MA BOUTIQUE' : rawShopName.trim().toUpperCase();
+      final shopPhone = profile['phone'] ?? '';
+      final shopAddress = profile['address'] ?? '';
 
       final doc = pw.Document();
       doc.addPage(
@@ -135,19 +144,23 @@ class _ExportScreenState extends State<ExportScreen>
           pageFormat: PdfPageFormat.a4,
           margin: const pw.EdgeInsets.all(32),
           build: (context) => [
-            // En-tête
             pw.Container(
               padding: const pw.EdgeInsets.all(20),
               decoration: pw.BoxDecoration(
-                color: const PdfColor(0.486, 0.227, 0.929), // violet
+                color: const PdfColor(0.486, 0.227, 0.929),
                 borderRadius: pw.BorderRadius.circular(12),
               ),
               child: pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-                    pw.Text(shopName, style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold, color: PdfColors.white)),
-                    pw.Text('Rapport de ventes', style: const pw.TextStyle(fontSize: 14, color: PdfColors.white)),
+                    pw.Text(shopName, style: const pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold, color: PdfColors.white)),
+                    if (shopAddress.isNotEmpty)
+                      pw.Text(shopAddress, style: const pw.TextStyle(fontSize: 10, color: PdfColors.white)),
+                    if (shopPhone.isNotEmpty)
+                      pw.Text('Tél : $shopPhone', style: const pw.TextStyle(fontSize: 10, color: PdfColors.white)),
+                    pw.SizedBox(height: 4),
+                    pw.Text('Rapport de ventes', style: const pw.TextStyle(fontSize: 12, color: PdfColors.white)),
                   ]),
                   pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
                     pw.Text('Période : $periodLabel', style: const pw.TextStyle(fontSize: 12, color: PdfColors.white)),
@@ -157,9 +170,7 @@ class _ExportScreenState extends State<ExportScreen>
               ),
             ),
             pw.SizedBox(height: 20),
-
-            // Résumé
-            pw.Text('Résumé', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold, color: const PdfColor(0.1, 0.063, 0.2))),
+            pw.Text('Résumé', style: const pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold, color: PdfColor(0.1, 0.063, 0.2))),
             pw.SizedBox(height: 10),
             pw.Row(children: [
               _summaryCard('Chiffre d\'affaires', formatFCFA(totalRevenue), PdfColors.purple50),
@@ -169,10 +180,8 @@ class _ExportScreenState extends State<ExportScreen>
               _summaryCard('Panier moyen', formatFCFA(avgSale), PdfColors.green50),
             ]),
             pw.SizedBox(height: 20),
-
-            // Méthodes de paiement
             if (paymentMethodCounts.isNotEmpty) ...[
-              pw.Text('Méthodes de paiement', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: const PdfColor(0.1, 0.063, 0.2))),
+              pw.Text('Méthodes de paiement', style: const pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColor(0.1, 0.063, 0.2))),
               pw.SizedBox(height: 8),
               pw.Wrap(
                 spacing: 8,
@@ -187,12 +196,10 @@ class _ExportScreenState extends State<ExportScreen>
               ),
               pw.SizedBox(height: 20),
             ],
-
-            // Top produits
-            pw.Text('Top 10 produits vendus', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: const PdfColor(0.063, 0.71, 0.506))),
+            pw.Text('Top 10 produits vendus', style: const pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColor(0.063, 0.71, 0.506))),
             pw.SizedBox(height: 8),
             pw.Table(
-              border: pw.TableBorder(horizontalInside: const pw.BorderSide(color: PdfColors.grey200)),
+              border: const pw.TableBorder(horizontalInside: pw.BorderSide(color: PdfColors.grey200)),
               columnWidths: {
                 0: const pw.FlexColumnWidth(3),
                 1: const pw.FlexColumnWidth(1),
@@ -202,9 +209,9 @@ class _ExportScreenState extends State<ExportScreen>
                 pw.TableRow(
                   decoration: const pw.BoxDecoration(color: PdfColors.grey100),
                   children: [
-                    pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('Produit', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10, color: PdfColors.grey700))),
-                    pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('Qté', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10, color: PdfColors.grey700), textAlign: pw.TextAlign.right)),
-                    pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('Revenu', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10, color: PdfColors.grey700), textAlign: pw.TextAlign.right)),
+                    pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('Produit', style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10, color: PdfColors.grey700))),
+                    pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('Qté', style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10, color: PdfColors.grey700), textAlign: pw.TextAlign.right)),
+                    pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('Revenu', style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10, color: PdfColors.grey700), textAlign: pw.TextAlign.right)),
                   ],
                 ),
                 if (top10.isEmpty)
@@ -225,12 +232,10 @@ class _ExportScreenState extends State<ExportScreen>
               ],
             ),
             pw.SizedBox(height: 24),
-
-            // Détail des ventes
-            pw.Text('Détail des ventes', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: const PdfColor(0.063, 0.71, 0.506))),
+            pw.Text('Détail des ventes', style: const pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColor(0.063, 0.71, 0.506))),
             pw.SizedBox(height: 8),
             pw.Table(
-              border: pw.TableBorder(horizontalInside: const pw.BorderSide(color: PdfColors.grey200)),
+              border: const pw.TableBorder(horizontalInside: pw.BorderSide(color: PdfColors.grey200)),
               columnWidths: {
                 0: const pw.FlexColumnWidth(1.5),
                 1: const pw.FlexColumnWidth(2),
@@ -241,10 +246,10 @@ class _ExportScreenState extends State<ExportScreen>
                 pw.TableRow(
                   decoration: const pw.BoxDecoration(color: PdfColors.grey100),
                   children: [
-                    pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('Date', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10, color: PdfColors.grey700))),
-                    pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('Client', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10, color: PdfColors.grey700))),
-                    pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('Paiement', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10, color: PdfColors.grey700))),
-                    pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('Total', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10, color: PdfColors.grey700), textAlign: pw.TextAlign.right)),
+                    pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('Date', style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10, color: PdfColors.grey700))),
+                    pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('Client', style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10, color: PdfColors.grey700))),
+                    pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('Paiement', style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10, color: PdfColors.grey700))),
+                    pw.Padding(padding: const pw.EdgeInsets.all(8), child: pw.Text('Total', style: const pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10, color: PdfColors.grey700), textAlign: pw.TextAlign.right)),
                   ],
                 ),
                 if (salesList.isEmpty)
@@ -271,7 +276,7 @@ class _ExportScreenState extends State<ExportScreen>
             pw.SizedBox(height: 32),
             pw.Center(
               child: pw.Text(
-                '— Document généré par Tembs — tembs.app —',
+                '— Document de synthèse généré pour $shopName —',
                 style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey400),
               ),
             ),
@@ -279,10 +284,31 @@ class _ExportScreenState extends State<ExportScreen>
         ),
       );
 
-      await Printing.sharePdf(
-        bytes: await doc.save(),
-        filename: 'tembs_contrat_${periodLabel.replaceAll(' ', '_')}.pdf',
-      );
+      final pdfBytes = await doc.save();
+      final sanitizedShopName = shopName.trim().replaceAll(RegExp(r'[^\w\s]+'), '').replaceAll(' ', '_');
+      final periodLabel2 = mode == 'month' ? '${months[selectedMonth]}_$selectedYear' : 'Annee_$selectedYear';
+      final fileName = 'rapport_${sanitizedShopName.toLowerCase()}_$periodLabel2.pdf';
+
+      if (share) {
+        // Mode partage : ouvre le sélecteur d'apps
+        await Printing.sharePdf(bytes: pdfBytes, filename: fileName);
+      } else {
+        // Mode téléchargement direct → Downloads (avec secours sécurisé)
+        try {
+          Directory? targetDir;
+          if (Platform.isAndroid) {
+            final androidDownloadDir = Directory('/storage/emulated/0/Download');
+            if (await androidDownloadDir.exists()) targetDir = androidDownloadDir;
+          }
+          targetDir ??= await getDownloadsDirectory() ?? await getApplicationDocumentsDirectory();
+          final file = File('${targetDir.path}/$fileName');
+          await file.writeAsBytes(pdfBytes, flush: true);
+          if (mounted) TicketGenerator.showTopDownloadNotification(context, file.path);
+        } catch (_) {
+          await Printing.sharePdf(bytes: pdfBytes, filename: fileName);
+        }
+      }
+
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -308,7 +334,7 @@ class _ExportScreenState extends State<ExportScreen>
         child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
           pw.Text(label, style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey600)),
           pw.SizedBox(height: 4),
-          pw.Text(value, style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: const PdfColor(0.1, 0.063, 0.2))),
+          pw.Text(value, style: const pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColor(0.1, 0.063, 0.2))),
         ]),
       ),
     );
@@ -316,6 +342,7 @@ class _ExportScreenState extends State<ExportScreen>
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final periodLabel = mode == 'month'
         ? '${months[selectedMonth]} $selectedYear'
         : 'Année $selectedYear';
@@ -324,7 +351,9 @@ class _ExportScreenState extends State<ExportScreen>
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: CustomScrollView(
+        physics: const BouncingScrollPhysics(),
         slivers: [
+
           // AppBar personnalisée
           SliverToBoxAdapter(
             child: Container(
@@ -500,24 +529,24 @@ class _ExportScreenState extends State<ExportScreen>
 
                 const SizedBox(height: 24),
 
-                // Bouton générer
+                // Bouton Télécharger
                 GradientButton(
-                  label: loading ? 'Génération...' : '📄 Générer et partager le PDF',
-                  onPressed: loading ? null : generatePdf,
+                  label: loading ? 'Génération...' : '⬇️  Télécharger le PDF',
+                  onPressed: loading ? null : () => _buildAndSavePdf(share: false),
                   loading: loading,
-                  icon: Icons.picture_as_pdf_rounded,
+                  icon: Icons.download_rounded,
                 ),
 
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
 
-                // Bouton aperçu rapide
+                // Bouton Partager
                 SizedBox(
                   width: double.infinity,
                   height: 52,
                   child: OutlinedButton.icon(
-                    onPressed: loadingPreview ? null : _loadPreview,
-                    icon: const Icon(Icons.refresh_rounded, size: 18),
-                    label: Text('Rafraîchir l\'aperçu', style: GoogleFonts.outfit(fontWeight: FontWeight.w600)),
+                    onPressed: loading ? null : () => _buildAndSavePdf(share: true),
+                    icon: const Icon(Icons.share_rounded, size: 18),
+                    label: Text('Partager le PDF', style: GoogleFonts.outfit(fontWeight: FontWeight.w600)),
                   ),
                 ),
 

@@ -112,6 +112,35 @@ class Sale {
       );
 }
 
+class SaleItem {
+  final String id;
+  final String saleId;
+  final String productId;
+  final String productName;
+  final double price;
+  final int quantity;
+
+  SaleItem({
+    required this.id,
+    required this.saleId,
+    required this.productId,
+    required this.productName,
+    required this.price,
+    required this.quantity,
+  });
+
+  double get lineTotal => price * quantity;
+
+  factory SaleItem.fromJson(Map<String, dynamic> json) => SaleItem(
+        id: json['id'],
+        saleId: json['sale_id'],
+        productId: json['product_id'],
+        productName: json['product_name'],
+        price: (json['price'] as num).toDouble(),
+        quantity: (json['quantity'] as num).toInt(),
+      );
+}
+
 class CartLine {
   final Product product;
   int quantity;
@@ -119,4 +148,30 @@ class CartLine {
   CartLine({required this.product, this.quantity = 1});
 
   double get lineTotal => product.price * quantity;
+}
+
+class TicketLine {
+  final String productName;
+  final int quantity;
+  final double unitPrice;
+
+  TicketLine({
+    required this.productName,
+    required this.quantity,
+    required this.unitPrice,
+  });
+
+  double get lineTotal => unitPrice * quantity;
+
+  factory TicketLine.fromCart(CartLine line) => TicketLine(
+        productName: line.product.name,
+        quantity: line.quantity,
+        unitPrice: line.product.price,
+      );
+
+  factory TicketLine.fromSaleItem(SaleItem item) => TicketLine(
+        productName: item.productName,
+        quantity: item.quantity,
+        unitPrice: item.price,
+      );
 }

@@ -45,9 +45,11 @@ class ProductImageView extends StatelessWidget {
       height: height,
       width: width,
       fit: fit,
+      cacheWidth: width != null && width! > 0 && width! != double.infinity ? (width! * 2).toInt() : 400,
       errorBuilder: (context, error, stackTrace) => _placeholder(),
     );
   }
+
 
   Widget _placeholder() {
     return Container(

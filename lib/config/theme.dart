@@ -117,14 +117,13 @@ final appTheme = ThemeData(
   useMaterial3: true,
   brightness: Brightness.light,
   scaffoldBackgroundColor: AppColors.bg,
-  colorScheme: ColorScheme.light(
+  colorScheme: const ColorScheme.light(
     primary: AppColors.primary,
     secondary: AppColors.accent,
     surface: AppColors.surface,
     onPrimary: AppColors.onPrimary,
     onSurface: AppColors.text,
     error: AppColors.danger,
-    background: AppColors.bg,
   ),
   textTheme: GoogleFonts.outfitTextTheme(
     const TextTheme(
