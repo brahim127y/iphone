@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart';
 import '../models/models.dart';
@@ -18,7 +19,23 @@ class DatabaseService {
   }
 
   static Future<Database> _initDB() async {
-    final dbDir = await getDatabasesPath();
+    String dbDir;
+    try {
+      if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+        final docDir = await getApplicationSupportDirectory();
+        dbDir = docDir.path;
+      } else {
+        dbDir = await getDatabasesPath();
+      }
+    } catch (_) {
+      try {
+        final docDir = await getApplicationDocumentsDirectory();
+        dbDir = docDir.path;
+      } catch (_) {
+        dbDir = '.';
+      }
+    }
+
     final dbPath = join(dbDir, 'tembs.db');
     try {
       await Directory(dbDir).create(recursive: true);
@@ -28,6 +45,8 @@ class DatabaseService {
       dbPath,
       version: 1,
       onCreate: (db, version) async {
+
+
 
         await db.execute('''
           CREATE TABLE categories (

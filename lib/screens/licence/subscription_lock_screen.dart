@@ -32,30 +32,43 @@ class _SubscriptionLockScreenState extends State<SubscriptionLockScreen> {
   }
 
   Future<void> _checkStatus() async {
-    setState(() => loading = true);
-    final sub = await DatabaseService.getSubscriptionStatus();
-    final onboardingDone = await DatabaseService.isOnboardingCompleted();
-
-    if (!sub.isExpired && !sub.isDateTampered) {
-      if (!mounted) return;
-      if (!onboardingDone) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const OnboardingScreen()),
-        );
-      } else {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const HomeShell()),
-        );
-      }
-      return;
-    }
-
-    if (!mounted) return;
     setState(() {
-      status = sub;
-      loading = false;
+      loading = true;
+      errorMsg = null;
     });
+    try {
+      final sub = await DatabaseService.getSubscriptionStatus();
+      final onboardingDone = await DatabaseService.isOnboardingCompleted();
+
+      if (!sub.isExpired && !sub.isDateTampered) {
+        if (!mounted) return;
+        if (!onboardingDone) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+          );
+        } else {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const HomeShell()),
+          );
+        }
+        return;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        status = sub;
+        loading = false;
+      });
+    } catch (e) {
+      debugPrint('Erreur lors du controle de licence: $e');
+      if (!mounted) return;
+      setState(() {
+        loading = false;
+        errorMsg = 'Erreur initialisation base de donnees : $e';
+      });
+    }
   }
+
 
   Future<void> _recharge() async {
     final code = codeController.text.trim();
