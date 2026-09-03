@@ -226,18 +226,23 @@ class ProductsScreenState extends State<ProductsScreen>
                   : RefreshIndicator(
                       onRefresh: loadData,
                       color: AppColors.primary,
-                      child: GridView.builder(
-                        physics: const BouncingScrollPhysics(),
-                        padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final isDesktop = constraints.maxWidth >= 800;
+                          final crossAxisCount = isDesktop ? 4 : 2;
+                          final childAspectRatio = isDesktop ? 0.78 : 0.72;
 
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 12,
-                          childAspectRatio: 0.72,
-                        ),
-                        itemCount: filtered.length,
-                        itemBuilder: (context, i) {
+                          return GridView.builder(
+                            physics: const BouncingScrollPhysics(),
+                            padding: EdgeInsets.fromLTRB(isDesktop ? 24 : 20, 4, isDesktop ? 24 : 20, 24),
+                            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: crossAxisCount,
+                              crossAxisSpacing: 12,
+                              mainAxisSpacing: 12,
+                              childAspectRatio: childAspectRatio,
+                            ),
+                            itemCount: filtered.length,
+                            itemBuilder: (context, i) {
                           final p = filtered[i];
                           final stockColor = _stockColor(p.quantity);
                           return GestureDetector(
@@ -304,10 +309,12 @@ class ProductsScreenState extends State<ProductsScreen>
                               ),
                             ),
                           );
-                        },
-                      ),
-                    ),
-        ),
+                        },    // itemBuilder
+                          );   // GridView.builder
+                        },     // LayoutBuilder builder
+                      ),       // LayoutBuilder
+                    ),         // RefreshIndicator
+        ),                     // Expanded
       ],
     );
   }
