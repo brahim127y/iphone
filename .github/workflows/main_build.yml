@@ -28,11 +28,17 @@ jobs:
       - name: Build Windows App
         run: flutter build windows --release
 
-      - name: Upload Windows Artifact
+      - name: Compile Windows Setup Installer (.exe)
+        run: |
+          iscc installer.iss
+
+      - name: Upload Windows Installer (Setup_Tembs_Boutique.exe)
         uses: actions/upload-artifact@v4
         with:
-          name: Tembs-Boutique-Windows-PC
-          path: build/windows/x64/runner/Release/
+          name: Setup_Tembs_Boutique_Windows
+          path: build/windows/installer/Setup_Tembs_Boutique.exe
+
+
 
   build-ios:
     name: Build iOS App (.app)
